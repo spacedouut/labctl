@@ -3,6 +3,12 @@ simple commandline tool for managing PVE nodes similar to GCP Compute Engine.
 
 `labctl` wraps common `qm` workflows for VM naming, VMID allocation, template cloning, SSH access, guest-agent commands, UFW rules, tags, and guarded deletes.
 
+## Install
+
+Run on PVE host:
+
+```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/refs/heads/main/install-labctl.sh | bash```
+
 ## Naming
 VM names go by `environment-name-instance`. For example, `prod-homeassistant-1`, `tmp-redis-1`, `lab-minecraft-2`, etc...
 
@@ -17,12 +23,6 @@ tpl-small-ubuntu-26-lts
 tpl-medium-ubuntu-26-lts
 tpl-large-ubuntu-26-lts
 ```
-
-## Install
-
-Run on the Proxmox host:
-
-```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/main/install-labctl.sh | bash```
 
 installs to:
 
