@@ -1,0 +1,23 @@
+{
+  "node": "pve",
+  "default_bridge": "vmbr0",
+  "default_user": "ubuntu",
+  "default_ssh_port": 22,
+  "envs": {
+    "prod": { "range": [100, 199], "description": "real workloads" },
+    "stag": { "range": [200, 299], "description": "staging" },
+    "dev": { "range": [300, 399], "description": "development" },
+    "infra": { "range": [400, 499], "description": "core infrastructure" },
+    "lab": { "range": [800, 899], "description": "experimental" },
+    "tmp": { "range": [900, 999], "description": "temporary / disposable" },
+    "tpl": { "range": [9000, 9099], "description": "templates" }
+  },
+  "networks": {
+    "lan": ["192.168.0.0/16"],
+  },
+  "bootstrap": {
+    "system": "/opt/labctl/bootstrap/initialize_system.sh",
+    "docker": "/opt/labctl/bootstrap/initialize_docker.sh",
+    "tailscale": "/opt/labctl/bootstrap/initialize_tailscale.sh"
+  }
+}
