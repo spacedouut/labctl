@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONFIG_FILE="${LABCTL_CONFIG:-/root/labctl.config.json}"
+if [[ -n "${LABCTL_CONFIG:-}" ]]; then
+  CONFIG_FILE="$LABCTL_CONFIG"
+elif [[ -r /etc/labctl/config.json ]]; then
+  CONFIG_FILE="/etc/labctl/config.json"
+else
+  CONFIG_FILE="/root/labctl.config.json"
+fi
 QEMU_DIR="/etc/pve/nodes/homelab/qemu-server"
 
 die() {
@@ -193,13 +199,11 @@ next_id() {
 }
 
 resolve_template() {
-  local size="$1" os="$2" vmid name
-  vmid="$(jq -er --arg size "$size" --arg os "$os" '.templates[$size][$os] // empty' "$CONFIG_FILE" 2>/dev/null || true)"
-  [[ -n "$vmid" ]] || die "no template configured for size=$size os=$os"
-  [[ "$vmid" != "9000" ]] || die "template 9000 ubuntu-base is forbidden"
-  [[ -e "$QEMU_DIR/$vmid.conf" ]] || die "configured template VMID $vmid does not exist"
-  name="$(vm_name "$vmid")"
-  [[ "$name" == tpl-* ]] || die "configured VMID $vmid is not named like a template: $name"
+  local size="$1" os="$2" template_name vmid
+  template_name="tpl-${size}-${os}"
+  vmid="$(vmid_by_name "$template_name")"
+  [[ "$vmid" != "9000" ]] || die "template $template_name resolved to VMID 9000, which labctl will not use"
+  [[ "$(template_field "$vmid" template)" == "1" ]] || die "$template_name exists at VMID $vmid but is not marked as a template"
   printf '%s\n' "$vmid"
 }
 
@@ -279,8 +283,17 @@ cmd_templates() {
   local sub="${1:-}"; shift || true
   case "$sub" in
     list)
-      jq -r '.templates | to_entries[] as $size | $size.value | to_entries[] | "\($size.key)\t\(.key)\t\(.value)"' "$CONFIG_FILE"
-      ;;
+      local f id name
+      for f in "$QEMU_DIR"/*.conf; do
+        [[ -e "$f" ]] || continue
+        id="${f##*/}"
+        id="${id%.conf}"
+        name="$(vm_name "$id")"
+        [[ "$name" == tpl-* ]] || continue
+        [[ "$(template_field "$id" template)" == "1" ]] || continue
+        printf '%s\t%s\n' "$id" "$name"
+      done | sort -n
+    ;;
     resolve)
       local size="" os=""
       while (($#)); do
