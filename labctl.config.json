@@ -13,7 +13,7 @@
     "tpl": { "range": [9000, 9099], "description": "templates" }
   },
   "networks": {
-    "lan": ["192.168.0.0/16"],
+    "lan": ["192.168.0.0/16"]
   },
   "bootstrap": {
     "system": "/opt/labctl/bootstrap/initialize_system.sh",
