@@ -22,7 +22,7 @@ tpl-large-ubuntu-26-lts
 
 Run on the Proxmox host:
 
-curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/main/install-labctl.sh | bash
+```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/main/install-labctl.sh | bash```
 
 installs to:
 
