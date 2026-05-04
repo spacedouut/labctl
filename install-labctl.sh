@@ -9,7 +9,11 @@ REPO_URL="${REPO_URL:-https://github.com/spacedouut/labctl.git}"
 REF="${REF:-main}"
 WORK_DIR="${WORK_DIR:-/opt/labctl}"
 LABCTL_FILE="${LABCTL_FILE:-labctl.sh}"
-SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+  SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+else
+  SOURCE_DIR=""
+fi
 
 install_file() {
   local src="$1" dest="$2" mode="$3"
