@@ -22,27 +22,42 @@ need() {
 usage() {
   cat <<'EOF'
 Usage:
-  labctl update
-  labctl ids next --env <env>
-  labctl templates list
-  labctl templates resolve --size <size> --os <os>
-  labctl vm plan <service> --env <env> --size <size> --os <os> [--instance <n>] [--tag <tag> ...]
-  labctl vm create <service> --env <env> --size <size> --os <os> [--instance <n>] [--tag <tag> ...] [--bootstrap] [--docker] [--tailscale]
-  labctl vm connect <vm-name> [--serial] [--user <user>] [--ip <ip>] [--no-key-check] [--command <cmd>] [-- <ssh-args>...]
-  labctl vm bootstrap <vm-name> [--system] [--docker] [--tailscale]
-  labctl vm start <vm-name>
-  labctl vm stop <vm-name>
-  labctl vm reboot <vm-name>
-  labctl vm reset <vm-name>
-  labctl vm shutdown <vm-name>
-  labctl vm pause <vm-name>
-  labctl vm firewall add <vm-name> --from <alias-or-cidr> --port <port> [--proto tcp|udp]
-  labctl vm tag list <vm-name>
-  labctl vm tag add <vm-name> <tag>
-  labctl vm tag remove <vm-name> <tag>
-  labctl vm tag set <vm-name> <tag> [<tag> ...]
-  labctl vm rename --vm <vm-name> <new-service>
-  labctl vm destroy <vm-name> [--force]
+  Maintenance:
+    labctl update
+
+  Discovery:
+    labctl ids next --env <env>
+    labctl templates list
+    labctl templates resolve --size <size> --os <os>
+
+  Provisioning:
+    labctl vm plan <service> --env <env> --size <size> --os <os> [--instance <n>] [--tag <tag> ...]
+    labctl vm create <service> --env <env> --size <size> --os <os> [--instance <n>] [--tag <tag> ...] [--bootstrap] [--docker] [--tailscale]
+    labctl vm bootstrap <vm-name> [--system] [--docker] [--tailscale]
+
+  Lifecycle:
+    labctl vm start <vm-name>
+    labctl vm stop <vm-name>
+    labctl vm reboot <vm-name>
+    labctl vm reset <vm-name>
+    labctl vm shutdown <vm-name>
+    labctl vm pause <vm-name>
+
+  Access:
+    labctl vm connect <vm-name> [--serial] [--user <user>] [--ip <ip>] [--no-key-check] [--command <cmd>] [-- <ssh-args>...]
+
+  Network:
+    labctl vm firewall add <vm-name> --from <alias-or-cidr> --port <port> [--proto tcp|udp]
+
+  Metadata:
+    labctl vm tag list <vm-name>
+    labctl vm tag add <vm-name> <tag>
+    labctl vm tag remove <vm-name> <tag>
+    labctl vm tag set <vm-name> <tag> [<tag> ...]
+    labctl vm rename --vm <vm-name> <new-service>
+
+  Destructive:
+    labctl vm destroy <vm-name> [--force]
 
 Names are env-service-instance, for example prod-homeassistant-1.
 EOF
