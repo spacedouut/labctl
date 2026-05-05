@@ -22,6 +22,7 @@ need() {
 usage() {
   cat <<'EOF'
 Usage:
+  labctl update
   labctl ids next --env <env>
   labctl templates list
   labctl templates resolve --size <size> --os <os>
@@ -29,6 +30,12 @@ Usage:
   labctl vm create <service> --env <env> --size <size> --os <os> [--instance <n>] [--tag <tag> ...] [--bootstrap] [--docker] [--tailscale]
   labctl vm connect <vm-name> [--serial] [--user <user>] [--ip <ip>] [--no-key-check] [--command <cmd>] [-- <ssh-args>...]
   labctl vm bootstrap <vm-name> [--system] [--docker] [--tailscale]
+  labctl vm start <vm-name>
+  labctl vm stop <vm-name>
+  labctl vm reboot <vm-name>
+  labctl vm reset <vm-name>
+  labctl vm shutdown <vm-name>
+  labctl vm pause <vm-name>
   labctl vm firewall add <vm-name> --from <alias-or-cidr> --port <port> [--proto tcp|udp]
   labctl vm tag list <vm-name>
   labctl vm tag add <vm-name> <tag>
@@ -475,6 +482,22 @@ cmd_vm_connect() {
   exec ssh "${ssh_args[@]}" "$user@$ip"
 }
 
+cmd_vm_power() {
+  local action="$1" name="${2:-}"
+  [[ -n "$name" ]] || die "VM name is required"
+  local vmid
+  vmid="$(vmid_by_name "$name")"
+  case "$action" in
+    start) qm start "$vmid" ;;
+    stop) qm stop "$vmid" ;;
+    reboot) qm reboot "$vmid" ;;
+    reset) qm reset "$vmid" ;;
+    shutdown) qm shutdown "$vmid" ;;
+    pause) qm suspend "$vmid" ;;
+    *) die "unknown power action: $action" ;;
+  esac
+}
+
 cmd_vm_firewall_add() {
   local name="${1:-}"; shift || true
   [[ -n "$name" ]] || die "VM name is required"
@@ -600,6 +623,7 @@ cmd_vm() {
     create) cmd_vm_create "$@" ;;
     connect) cmd_vm_connect "$@" ;;
     bootstrap) cmd_vm_bootstrap "$@" ;;
+    start|stop|reboot|reset|shutdown|pause) cmd_vm_power "$sub" "$@" ;;
     firewall)
       local fw_sub="${1:-}"; shift || true
       case "$fw_sub" in
@@ -623,13 +647,26 @@ cmd_vm() {
   esac
 }
 
+cmd_update() {
+  local repo_dir="/opt/labctl"
+  local installer="$repo_dir/install-labctl.sh"
+  [[ -d "$repo_dir/.git" ]] || die "update requires a git checkout at $repo_dir"
+  [[ -x "$installer" || -f "$installer" ]] || die "installer not found at $installer"
+  need git
+  git -C "$repo_dir" pull --ff-only
+  INSTALL_CONFIG=0 bash "$installer"
+}
+
 main() {
-  require_config
   local cmd="${1:-}"; shift || true
   case "$cmd" in
+    update) cmd_update "$@" ;;
     ids) cmd_ids "$@" ;;
     templates) cmd_templates "$@" ;;
-    vm) cmd_vm "$@" ;;
+    vm)
+      require_config
+      cmd_vm "$@"
+      ;;
     -h|--help|help|"") usage ;;
     *) usage; die "unknown command: $cmd" ;;
   esac

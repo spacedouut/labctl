@@ -54,6 +54,8 @@ Bootstrap scripts live in `/opt/labctl/bootstrap`. Each script does something di
 
 ## Common Commands
 ```shell
+# Update from git and reinstall the binary only:
+labctl update
 # List templates
 labctl templates list
 # Test template resolution
@@ -72,6 +74,13 @@ labctl vm connect prod-redis-1
 labctl vm connect prod-redis-1 --command 'hostname && whoami'
 # Open serial console:
 labctl vm connect prod-redis-1 --serial
+# Basic VM power controls:
+labctl vm start prod-redis-1
+labctl vm stop prod-redis-1
+labctl vm reboot prod-redis-1
+labctl vm reset prod-redis-1
+labctl vm shutdown prod-redis-1
+labctl vm pause prod-redis-1
 # Add a UFW rule using a network alias:
 labctl vm firewall add prod-redis-1 --from lan --port 6379
 # Manage tags:

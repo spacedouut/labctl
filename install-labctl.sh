@@ -9,6 +9,8 @@ REPO_URL="${REPO_URL:-https://github.com/spacedouut/labctl.git}"
 REF="${REF:-main}"
 WORK_DIR="${WORK_DIR:-/opt/labctl}"
 LABCTL_FILE="${LABCTL_FILE:-labctl.sh}"
+INSTALL_BINARY="${INSTALL_BINARY:-1}"
+INSTALL_CONFIG="${INSTALL_CONFIG:-1}"
 if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
   SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 else
@@ -48,18 +50,24 @@ main() {
 
   [[ -f "$SOURCE_DIR/$LABCTL_FILE" ]] || { echo "missing $LABCTL_FILE in $SOURCE_DIR" >&2; exit 1; }
 
-  install_file "$SOURCE_DIR/$LABCTL_FILE" "$BIN_DIR/labctl" 0755
-
-  if [[ -f "$CONFIG_FILE" ]]; then
-    echo "Keeping existing config: $CONFIG_FILE"
-  elif [[ -f "$SOURCE_DIR/labctl.config.json" ]]; then
-    install_file "$SOURCE_DIR/labctl.config.json" "$CONFIG_FILE" 0644
-    echo "Installed default config: $CONFIG_FILE"
-  else
-    echo "No labctl.config.json found next to installer; skipping config install" >&2
+  if [[ "$INSTALL_BINARY" == "1" ]]; then
+    install_file "$SOURCE_DIR/$LABCTL_FILE" "$BIN_DIR/labctl" 0755
   fi
 
-  echo "Installed: $BIN_DIR/labctl"
+  if [[ "$INSTALL_CONFIG" == "1" ]]; then
+    if [[ -f "$CONFIG_FILE" ]]; then
+      echo "Keeping existing config: $CONFIG_FILE"
+    elif [[ -f "$SOURCE_DIR/labctl.config.json" ]]; then
+      install_file "$SOURCE_DIR/labctl.config.json" "$CONFIG_FILE" 0644
+      echo "Installed default config: $CONFIG_FILE"
+    else
+      echo "No labctl.config.json found next to installer; skipping config install" >&2
+    fi
+  fi
+
+  if [[ "$INSTALL_BINARY" == "1" ]]; then
+    echo "Installed: $BIN_DIR/labctl"
+  fi
   echo
   echo "Try:"
   echo "  labctl templates list"
