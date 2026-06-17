@@ -20,7 +20,7 @@ need() {
 }
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE_EOF'
 Usage:
   Maintenance:
     labctl update
@@ -60,7 +60,7 @@ Usage:
     labctl vm destroy <vm-name> [--force]
 
 Names are env-service-instance, for example prod-homeassistant-1.
-EOF
+USAGE_EOF
 }
 
 json() {
@@ -344,7 +344,7 @@ print_plan() {
   else
     tag_text="none"
   fi
-  cat <<EOF
+  cat <<PLAN_EOF
 Will create:
   Name: $name
   VMID: $vmid
@@ -354,7 +354,7 @@ Will create:
   Disk: $disk
   Tags: $tag_text
   Firewall: 22/tcp from mgmt
-EOF
+PLAN_EOF
 }
 
 cmd_vm_plan() {
@@ -439,13 +439,26 @@ cmd_vm_create() {
   fi
   if ((BOOTSTRAP)); then
     qm start "$vmid"
-    printf 'Waiting for guest agent on %s...\n' "$name"
-    for _ in {1..60}; do
-      if qm guest cmd "$vmid" ping >/dev/null 2>&1; then
-        break
-      fi
-      sleep 2
-    done
+    printf 'VM %s started. Waiting 10s for networking...\n' "$name"
+    sleep 10
+
+    local ip
+    ip="$(best_guest_ip "$vmid" || true)"
+    [[ -n "$ip" ]] || die "could not resolve IP for $name after 10s"
+
+    local os_name="${OS_NAME:-ubuntu}"
+    local user
+    case "$os_name" in
+      ubuntu) user="ubuntu" ;;
+      debian) user="debian" ;;
+      alpine) user="alpine" ;;
+      arch)   user="arch" ;;
+      *)      user="ubuntu" ;;
+    esac
+
+    printf 'Copying bootstrap files for %s to %s (%s)...\n' "$os_name" "$name" "$ip"
+    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "bootstrap/$os_name/"* "$user@$ip:/tmp/"
+
     local args=()
     ((WANT_SYSTEM)) && args+=(--system)
     ((WANT_DOCKER)) && args+=(--docker)
@@ -613,13 +626,13 @@ cmd_vm_destroy() {
   vmid="$(vmid_by_name "$name")"
   status="$(vm_status "$vmid")"
   tags="$(vm_tags "$vmid")"
-  cat >&2 <<EOF
+  cat >&2 <<DESTROY_EOF
 Will destroy:
   Name: $name
   VMID: $vmid
   Status: $status
   Tags: ${tags:-none}
-EOF
+DESTROY_EOF
   if ((force)); then
     [[ "$name" =~ ^tmp- || "$name" =~ ^lab- ]] || die "--force is only allowed for tmp-* or lab-* VMs"
   else
