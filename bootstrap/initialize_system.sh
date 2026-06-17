@@ -62,7 +62,7 @@ systemctl enable serial-getty@ttyS0.service
 echo "== Hardening SSH =="
 mkdir -p /etc/ssh/sshd_config.d
 
-cat > /etc/ssh/sshd_config.d/99-homelab-hardening.conf <<EOF
+cat > /etc/ssh/sshd_config.d/99-hardening.conf <<EOF
 Port $SSH_PORT
 PermitRootLogin no
 PasswordAuthentication no
