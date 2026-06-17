@@ -438,32 +438,45 @@ cmd_vm_create() {
     qm set "$vmid" --tags "$tag_text" >/dev/null
   fi
   if ((BOOTSTRAP)); then
-    qm start "$vmid"
-    printf 'VM %s started. Waiting 10s for networking...\n' "$name"
-    sleep 10
+    local os_lower
+    os_lower="$(echo "${OS_NAME:-ubuntu}" | tr '[:upper:]' '[:lower:]')"
+    if [[ "$os_lower" == "none" ]]; then
+      printf 'OS is none; skipping bootstrap for %s.\n' "$name"
+    else
+      qm start "$vmid"
+      printf 'Waiting for guest agent on %s...\n' "$name"
+      local i agent_ready=0
+      for ((i=1; i<=60; i++)); do
+        if qm guest cmd "$vmid" ping >/dev/null 2>&1; then
+          agent_ready=1
+          break
+        fi
+        sleep 2
+      done
+      (( agent_ready )) || die "guest agent did not become responsive on $name within 120s"
 
-    local ip
-    ip="$(best_guest_ip "$vmid" || true)"
-    [[ -n "$ip" ]] || die "could not resolve IP for $name after 10s"
+      local ip
+      ip="$(best_guest_ip "$vmid" || true)"
+      [[ -n "$ip" ]] || die "could not resolve IP for $name"
 
-    local os_name="${OS_NAME:-ubuntu}"
-    local user
-    case "$os_name" in
-      ubuntu) user="ubuntu" ;;
-      debian) user="debian" ;;
-      alpine) user="alpine" ;;
-      arch)   user="arch" ;;
-      *)      user="ubuntu" ;;
-    esac
+      local user
+      case "$os_lower" in
+        ubuntu) user="ubuntu" ;;
+        debian) user="debian" ;;
+        alpine) user="alpine" ;;
+        arch)   user="arch" ;;
+        *)      user="ubuntu" ;;
+      esac
 
-    printf 'Copying bootstrap files for %s to %s (%s)...\n' "$os_name" "$name" "$ip"
-    scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "bootstrap/$os_name/"* "$user@$ip:/tmp/"
+      printf 'Copying bootstrap files for %s to %s (%s)...\n' "$os_lower" "$name" "$ip"
+      scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -r "bootstrap/$os_lower/"* "$user@$ip:/tmp/"
 
-    local args=()
-    ((WANT_SYSTEM)) && args+=(--system)
-    ((WANT_DOCKER)) && args+=(--docker)
-    ((WANT_TAILSCALE)) && args+=(--tailscale)
-    cmd_vm_bootstrap "$name" "${args[@]}"
+      local args=()
+      ((WANT_SYSTEM)) && args+=(--system)
+      ((WANT_DOCKER)) && args+=(--docker)
+      ((WANT_TAILSCALE)) && args+=(--tailscale)
+      cmd_vm_bootstrap "$name" "${args[@]}"
+    fi
   fi
 }
 
