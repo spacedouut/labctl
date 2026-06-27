@@ -32,12 +32,13 @@ require_root() {
 main() {
   require_root
 
-  command -v bash >/dev/null || { echo "missing bash" >&2; exit 1; }
-  command -v jq >/dev/null || { echo "missing jq; install jq first" >&2; exit 1; }
-  command -v qm >/dev/null || { echo "missing qm; run this on a Proxmox host" >&2; exit 1; }
+  command -v bash >/dev/null || { echo "Missing bash (..how?)" >&2; exit 1; }
+  command -v jq >/dev/null   || { echo "Missing jq! Install with: sudo apt install jq" >&2; exit 1; }
+  command -v qm >/dev/null   || { echo "Missing qm! (run this on a Proxmox host!)" >&2; exit 1; }
+  command -v gum >/dev/null  || { echo "Missing gum! Install with: sudo apt install gum" }
+  command -v git >/dev/null  || { echo "Missing git! Install with: sudo apt install git " >&2; exit 1; }
 
   if [[ ! -f "$SOURCE_DIR/$LABCTL_FILE" ]]; then
-    command -v git >/dev/null || { echo "missing git; install git first" >&2; exit 1; }
     if [[ -f "$WORK_DIR/$LABCTL_FILE" ]]; then
       echo "Using existing checkout: $WORK_DIR"
     else
