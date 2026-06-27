@@ -1,40 +1,23 @@
-# labctl
-simple commandline tool for managing PVE nodes similar to GCP Compute Engine.
-
-`labctl` wraps common `qm` workflows for VM naming, VMID allocation, template cloning, SSH access, guest-agent commands, UFW rules, tags, and guarded deletes.
+# phase
+phase (stylized to lowercase) is a compute-engine-like CLI tool for managing Proxmox VE Virtual Machines.
 
 ## Install
 
 Run on PVE host:
 
-```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/refs/heads/main/install-labctl.sh | bash```
-
-## Naming
-VM names go by `environment-name-instance`. For example, `prod-homeassistant-1`, `tmp-redis-1`, `lab-minecraft-2`, etc...
-
-Templates are resolved by Proxmox VM name:
-```
-tpl-<size>-<os>
-```
-So, for example:
-```
-tpl-micro-ubuntu-26-lts
-tpl-small-ubuntu-26-lts
-tpl-medium-ubuntu-26-lts
-tpl-large-ubuntu-26-lts
-```
+```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/refs/heads/main/installer.sh | bash```
 
 installs to:
 
 ```
-/opt/labctl # repo for updating
-/usr/local/bin/labctl # actual binary / script
-/etc/labctl/config.json # configuration
+/opt/phase # repo for updating
+/usr/local/bin/phase # actual binary / script
+/etc/phase/config.json # configuration
 ```
 
 ## Config
 
-/etc/labctl/config.json defines local policy such as:
+/etc/phase/config.json defines local policy such as:
 
 - VMID ranges by environment
 - Network aliases like lan
@@ -50,51 +33,4 @@ Example network alias:
 
 ## Bootstrap
 
-Bootstrap scripts live in `/opt/labctl/bootstrap`. Each script does something different; `initialize_system` sets up basic tooling like ufw, qemu, and others, `initialize_docker` installs docker, `initialize_tailscale` installs tailscale
-
-## Common Commands
-```shell
-# Update from git and reinstall the binary only:
-labctl update
-# List templates
-labctl templates list
-# Test template resolution
-labctl templates resolve --size small --os ubuntu-26-lts
-# Find next VMID:
-labctl ids next --env prod
-# Plan a VM (see what it will do):
-labctl vm plan redis --env prod --size small --os ubuntu-26-lts
-# Create a VM:
-labctl vm create redis --env prod --size small --os ubuntu-26-lts
-# Create with bootstrap options (install docker or tailscale too):
-labctl vm create app --env lab --size medium --os ubuntu-26-lts --docker --tailscale
-# Connect over SSH:
-labctl vm connect prod-redis-1
-# Run a command over SSH:
-labctl vm connect prod-redis-1 --command 'hostname && whoami'
-# Open serial console:
-labctl vm connect prod-redis-1 --serial
-# Basic VM power controls:
-labctl vm start prod-redis-1
-labctl vm stop prod-redis-1
-labctl vm reboot prod-redis-1
-labctl vm reset prod-redis-1
-labctl vm shutdown prod-redis-1
-labctl vm pause prod-redis-1
-# Add a UFW rule using a network alias:
-labctl vm firewall add prod-redis-1 --from lan --port 6379
-# Manage tags:
-labctl vm tag list prod-redis-1
-labctl vm tag add prod-redis-1 db
-labctl vm tag remove prod-redis-1 db
-labctl vm tag set prod-redis-1 db cache
-# Rename while preserving env and instance:
-labctl vm rename --vm prod-redis-1 web_redis
-# Result: prod-web_redis-1
-# Destroy a VM (requires confirmation):
-labctl vm destroy prod-redis-1
-```
-
-# Friendly install reminder
-
-This essentially *assumes* you'll be using Ubuntu-based VMs with Cloudinit. I'll be making this more dynamic soon, supporting other distros like Debian or even Kali, but for now, ubuntu remains.
+Bootstrap scripts live in `/opt/phase/bootstrap/` and they run automatically depending on your OS. They configure things like SSH, UFW, Fail2Ban on SSH, etc..
