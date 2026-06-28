@@ -101,7 +101,7 @@ json() {
 gum_or_abort() {
   local out rc=0
   out="$(gum "$@" 2>/dev/null)" || rc=$?
-  if (( rc == 130 )); then
+  if (( rc == 130 || rc == 124 )); then
     exit 130
   fi
   if [[ -n "$out" ]]; then
@@ -122,7 +122,7 @@ prompt_or_abort() {
 confirm_or_abort() {
   local rc=0
   gum "$@" 2>/dev/null || rc=$?
-  if (( rc == 130 )); then
+  if (( rc == 130 || rc == 124 )); then
     exit 130
   fi
   return "$rc"
