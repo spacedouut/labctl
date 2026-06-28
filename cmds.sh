@@ -59,7 +59,7 @@ EOF
 choose_or_die() {
   local prompt="$1"; shift
   (($#)) || die "$prompt: no options available"
-  gum_or_abort choose --header "$prompt" "$@"
+  gum choose --header "$prompt" "$@"
 }
 
 # Build a validated plan JSON from flags, running a full gum wizard for any
@@ -95,7 +95,7 @@ gather_plan() {
   if [[ -z "$name" || -z "$size" || -z "$os" ]]; then
     require_tty "missing required fields (name/size/os)"
   fi
-  [[ -n "$name" ]] || name="$(gum_or_abort input --header "VM name" --placeholder "postgres")"
+  [[ -n "$name" ]] || name="$(gum input --header "VM name" --placeholder "postgres")"
   [[ -n "$size" ]] || size="$(choose_or_die "Size" $(jq -r '.templates.sizes | keys[]' "$CONFIG_FILE"))"
   if [[ -z "$os" ]]; then
     local -a tpls=()
@@ -106,29 +106,29 @@ gather_plan() {
   # Full wizard for the rest — only when interactive AND not already set by flags.
   if have_tty; then
     if [[ -z "$disk_size" ]]; then
-      disk_size="$(gum_or_abort input --header "Disk size (blank = template default)" --placeholder "32G")"
+      disk_size="$(gum input --header "Disk size (blank = template default)" --placeholder "32G")"
       if [[ -n "$disk_size" && -z "$disk_store" ]]; then
         local -a stores=(); mapfile -t stores < <(list_storages)
-        ((${#stores[@]})) && disk_store="$(gum_or_abort choose --header "Disk storage" "${stores[@]}")"
+        ((${#stores[@]})) && disk_store="$(gum choose --header "Disk storage" "${stores[@]}")"
       fi
     fi
     if [[ -z "$bridge" ]]; then
       local -a brs=(); mapfile -t brs < <(list_bridges)
-      ((${#brs[@]})) && bridge="$(gum_or_abort choose --header "Network bridge (Esc = template default)" "${brs[@]}" || true)"
+      ((${#brs[@]})) && bridge="$(gum choose --header "Network bridge (Esc = template default)" "${brs[@]}" || true)"
     fi
-    [[ -n "$vlan" ]] || vlan="$(gum_or_abort input --header "VLAN tag (blank = none)" --placeholder "")"
+    [[ -n "$vlan" ]] || vlan="$(gum input --header "VLAN tag (blank = none)" --placeholder "")"
     if [[ -z "$ipcfg" ]]; then
-      local mode; mode="$(gum_or_abort choose --header "IP config" "dhcp" "static")"
+      local mode; mode="$(gum choose --header "IP config" "dhcp" "static")"
       if [[ "$mode" == "static" ]]; then
-        ipcfg="$(gum_or_abort input --header "Static IP (CIDR, e.g. 10.0.0.5/24)")"
-        [[ -n "$gw" ]] || gw="$(gum_or_abort input --header "Gateway (e.g. 10.0.0.1)")"
+        ipcfg="$(gum input --header "Static IP (CIDR, e.g. 10.0.0.5/24)")"
+        [[ -n "$gw" ]] || gw="$(gum input --header "Gateway (e.g. 10.0.0.1)")"
       else
         ipcfg="dhcp"
       fi
     fi
-    gum_or_abort confirm "Start on boot?" && onboot="1" || onboot="0"
-    [[ -n "$description" ]] || description="$(gum_or_abort input --header "Description (blank = none)")"
-    [[ -n "$protect" ]] || { gum_or_abort confirm --default=no "Protect from deletion?" && protect="1" || protect="0"; }
+    gum confirm "Start on boot?" && onboot="1" || onboot="0"
+    [[ -n "$description" ]] || description="$(gum input --header "Description (blank = none)")"
+    [[ -n "$protect" ]] || { gum confirm --default=no "Protect from deletion?" && protect="1" || protect="0"; }
   fi
   [[ -n "$protect" ]] || protect="0"
 
@@ -229,7 +229,7 @@ realize_plan() {
   # Confirmation gate — interactive only. Non-interactive (provision, --save
   # consumers, CI) proceeds, since the flags/plan ARE the expressed intent.
   print_plan "$plan" >&2
-  if have_tty && ! gum_or_abort confirm "Create this VM?"; then
+  if have_tty && ! gum confirm "Create this VM?"; then
     die "aborted by user"
   fi
 

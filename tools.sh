@@ -96,15 +96,6 @@ json() {
   jq -r "$1" "$CONFIG_FILE"
 }
 
-# Wrap a gum command so Ctrl+C (exit 130) always aborts, even inside
-# conditionals where set -e is disabled.
-gum_or_abort() {
-  local rc=0
-  gum "$@" || rc=$?
-  (( rc == 130 )) && exit 130
-  return "$rc"
-}
-
 # True when /dev/tty is usable — gum's interactive widgets read/write it
 # directly, so this stays correct even inside $(...) where stdout is a pipe.
 # Over non-interactive SSH/CI /dev/tty does not exist, so this is false.
