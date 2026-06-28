@@ -121,7 +121,7 @@ gather_plan() {
     if [[ -z "$bridge" ]]; then
       local -a brs=(); mapfile -t brs < <(list_bridges)
       if ((${#brs[@]})); then
-        bridge="$(gum_or_abort choose --header "Network bridge" "${brs[@]}")" || bridge=""
+        bridge="$(gum_or_abort choose --header "Network bridge" "${brs[@]}")" || true
       fi
     fi
     if [[ -z "$vlan" ]]; then
