@@ -47,40 +47,6 @@ get_qemu_dir() {
 
 QEMU_DIR="$(get_qemu_dir)"
 
-# Cancellation / cleanup state. realize_plan arms _PHASE_ROLLBACK_VMID before
-# the clone and clears it on success; the INT trap destroys the partial VM.
-_PHASE_ROLLBACK_VMID=""
-_PHASE_CLEANUP_FILES=()
-_PHASE_CAUGHT_SIGNAL=""
-
-_phase_cleanup() {
-  local rc=$?
-  trap - INT TERM EXIT
-  if [[ -n "$_PHASE_ROLLBACK_VMID" ]]; then
-    warn "Interrupted — destroying partial VM ${_PHASE_ROLLBACK_VMID}..."
-    qm stop "$_PHASE_ROLLBACK_VMID" --skiplock 1 >/dev/null 2>&1 || true
-    qm destroy "$_PHASE_ROLLBACK_VMID" --purge 1 >/dev/null 2>&1 || true
-    _PHASE_ROLLBACK_VMID=""
-  fi
-  local f
-  for f in "${_PHASE_CLEANUP_FILES[@]}"; do
-    rm -f "$f" 2>/dev/null || true
-  done
-  _PHASE_CLEANUP_FILES=()
-  if [[ -n "$_PHASE_CAUGHT_SIGNAL" ]]; then
-    exit 130
-  fi
-  exit "$rc"
-}
-
-_phase_on_signal() {
-  _PHASE_CAUGHT_SIGNAL=1
-  _phase_cleanup
-}
-
-trap _phase_on_signal INT TERM
-trap _phase_cleanup EXIT
-
 need() {
   command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
 }
