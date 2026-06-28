@@ -5,7 +5,7 @@ cmd_vm() {
     plan) cmd_vm_plan "$@" ;;
     create) cmd_vm_create "$@" ;;
     provision) cmd_vm_provision "$@" ;;
-    connect) cmd_vm_connect "$@" ;;
+    shell) cmd_vm_connect "$@" ;;
     bootstrap) cmd_vm_bootstrap "$@" ;;
     start|stop|reboot|reset|shutdown|pause) cmd_vm_power "$sub" "$@" ;;
     firewall)
@@ -397,6 +397,31 @@ cmd_vm_bootstrap() {
     log "Bootstrapping $step on ${name}..."
     qga_run_script "$vmid" "$script"
   done
+}
+
+cmd_vm_connect() {
+  local name="${1:-}"; shift || true
+  [[ -n "$name" ]] || die "VM name is required"
+  local serial=0
+  while (($#)); do
+    case "$1" in
+      --serial) serial=1; shift ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  local vmid
+  vmid="$(vmid_by_name "$name")"
+  if ((serial)); then
+    exec qm terminal "$vmid"
+  fi
+  local status
+  status="$(qm status "$vmid" | awk '{print $2}')"
+  [[ "$status" == "running" ]] || die "$name is $status; start it or use --serial"
+  local user ip
+  user="$(template_field "$vmid" ciuser)"
+  [[ -n "$user" ]] || user="$(json '.default_user // "root"')"
+  ip="$(best_guest_ip "$vmid")" || die "no guest-agent IPv4 found for $name; try --serial"
+  exec ssh "$user@$ip"
 }
 
 cmd_vm_power() {

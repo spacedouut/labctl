@@ -28,7 +28,7 @@ usage() {
 
   VM command list:
     plan, provision, bootstrap, create, start, 
-    stop, reboot, reset, shutdown, connect, 
+    stop, reboot, reset, shutdown, shell, 
     firewall, tag, rename, destroy, status, nextid
 
   Configure from /etc/phase.json
