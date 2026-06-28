@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PHASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PHASE_DIR="/opt/phase"
 source "$PHASE_DIR/tools.sh"
 source "$PHASE_DIR/cmds.sh"
 
