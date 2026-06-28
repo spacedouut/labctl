@@ -233,6 +233,9 @@ realize_plan() {
     die "aborted by user"
   fi
 
+  # Arm rollback — if interrupted after this point, the partial VM gets destroyed.
+  _PHASE_ROLLBACK_VMID="$vmid"
+
   # Clone, placing the disk on the requested storage when given.
   local disk_store
   disk_store="$(jq -r '.disk.storage // empty' <<<"$plan")"
@@ -290,6 +293,7 @@ realize_plan() {
   local keyfile
   keyfile="$(build_sshkeys_file "$vmid" "${plan_keys[@]}")"
   if [[ -n "$keyfile" ]]; then
+    _PHASE_CLEANUP_FILES+=("$keyfile")
     qm set "$vmid" --sshkeys "$keyfile" >/dev/null
     rm -f "$keyfile"
   fi
@@ -304,6 +308,9 @@ realize_plan() {
     jq --argjson vmid "$vmid" '.vmid = $vmid' "$(plan_path "$name")" \
       | write_plan "$name"
   fi
+
+  # Success — disarm rollback so the trap won't destroy a completed VM.
+  _PHASE_ROLLBACK_VMID=""
 
   # The one line on stdout: the VMID provision needs.
   printf '%s\n' "$vmid"
