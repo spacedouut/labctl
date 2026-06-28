@@ -58,12 +58,8 @@ main() {
 
   if [[ "$INSTALL_WRAPPER" == "1" ]]; then
     install -d "$BIN_DIR"
-    cat >"$BIN_DIR/phase" <<EOF
-#!/usr/bin/env bash
-exec "$WORK_DIR/phase.sh" "\$@"
-EOF
-    chmod 0755 "$BIN_DIR/phase"
-    echo "Installed wrapper: $BIN_DIR/phase -> $WORK_DIR/phase.sh"
+    ln -sf "$WORK_DIR/phase.sh" "$BIN_DIR/phase"
+    echo "Installed: $BIN_DIR/phase -> $WORK_DIR/phase.sh"
   fi
 
   if [[ "$INSTALL_CONFIG" == "1" ]]; then
