@@ -95,40 +95,65 @@ gather_plan() {
   if [[ -z "$name" || -z "$size" || -z "$os" ]]; then
     require_tty "missing required fields (name/size/os)"
   fi
-  [[ -n "$name" ]] || name="$(gum_or_abort input --header "VM name" --placeholder "postgres")"
-  [[ -n "$size" ]] || size="$(choose_or_die "Size" $(jq -r '.templates.sizes | keys[]' "$CONFIG_FILE"))"
+  if [[ -z "$name" ]]; then
+    name="$(gum_or_abort input --header "VM name" --placeholder "postgres")"
+  fi
+  if [[ -z "$size" ]]; then
+    size="$(gum_or_abort choose --header "Size" $(jq -r '.templates.sizes | keys[]' "$CONFIG_FILE"))"
+  fi
   if [[ -z "$os" ]]; then
     local -a tpls=()
     mapfile -t tpls < <(list_template_oses)
-    os="$(choose_or_die "OS template" "${tpls[@]}")"
+    os="$(gum_or_abort choose --header "OS template" "${tpls[@]}")"
   fi
 
   # Full wizard for the rest — only when interactive AND not already set by flags.
   if have_tty; then
     if [[ -z "$disk_size" ]]; then
       disk_size="$(gum_or_abort input --header "Disk size (blank = template default)" --placeholder "32G")"
-      if [[ -n "$disk_size" && -z "$disk_store" ]]; then
-        local -a stores=(); mapfile -t stores < <(list_storages)
-        ((${#stores[@]})) && disk_store="$(gum_or_abort choose --header "Disk storage" "${stores[@]}")"
+    fi
+    if [[ -n "$disk_size" && -z "$disk_store" ]]; then
+      local -a stores=(); mapfile -t stores < <(list_storages)
+      if ((${#stores[@]})); then
+        disk_store="$(gum_or_abort choose --header "Disk storage" "${stores[@]}")"
       fi
     fi
     if [[ -z "$bridge" ]]; then
       local -a brs=(); mapfile -t brs < <(list_bridges)
-      ((${#brs[@]})) && bridge="$(gum_or_abort choose --header "Network bridge (Esc = template default)" "${brs[@]}" || true)"
+      if ((${#brs[@]})); then
+        bridge="$(gum_or_abort choose --header "Network bridge" "${brs[@]}")" || true
+      fi
     fi
-    [[ -n "$vlan" ]] || vlan="$(gum_or_abort input --header "VLAN tag (blank = none)" --placeholder "")"
+    if [[ -z "$vlan" ]]; then
+      vlan="$(gum_or_abort input --header "VLAN tag (blank = none)" --placeholder "")"
+    fi
     if [[ -z "$ipcfg" ]]; then
-      local mode; mode="$(gum_or_abort choose --header "IP config" "dhcp" "static")"
+      local mode
+      mode="$(gum_or_abort choose --header "IP config" "dhcp" "static")"
       if [[ "$mode" == "static" ]]; then
         ipcfg="$(gum_or_abort input --header "Static IP (CIDR, e.g. 10.0.0.5/24)")"
-        [[ -n "$gw" ]] || gw="$(gum_or_abort input --header "Gateway (e.g. 10.0.0.1)")"
+        if [[ -z "$gw" ]]; then
+          gw="$(gum_or_abort input --header "Gateway (e.g. 10.0.0.1)")"
+        fi
       else
         ipcfg="dhcp"
       fi
     fi
-    gum_or_abort confirm "Start on boot?" && onboot="1" || onboot="0"
-    [[ -n "$description" ]] || description="$(gum_or_abort input --header "Description (blank = none)")"
-    [[ -n "$protect" ]] || { gum_or_abort confirm --default=no "Protect from deletion?" && protect="1" || protect="0"; }
+    if confirm_or_abort confirm "Start on boot?"; then
+      onboot="1"
+    else
+      onboot="0"
+    fi
+    if [[ -z "$description" ]]; then
+      description="$(gum_or_abort input --header "Description (blank = none)")"
+    fi
+    if [[ -z "$protect" ]]; then
+      if confirm_or_abort confirm --default=no "Protect from deletion?"; then
+        protect="1"
+      else
+        protect="0"
+      fi
+    fi
   fi
   [[ -n "$protect" ]] || protect="0"
 
@@ -226,11 +251,12 @@ realize_plan() {
   agent=0
   [[ "$(json '.vm.agent // true')" == "true" ]] && agent=1
 
-  # Confirmation gate — interactive only. Non-interactive (provision, --save
-  # consumers, CI) proceeds, since the flags/plan ARE the expressed intent.
+  # Confirmation gate — interactive only.
   print_plan "$plan" >&2
-  if have_tty && ! gum_or_abort confirm "Create this VM?"; then
-    die "aborted by user"
+  if have_tty; then
+    if ! confirm_or_abort confirm "Create this VM?"; then
+      die "aborted by user"
+    fi
   fi
 
   # Arm rollback — if interrupted after this point, the partial VM gets destroyed.

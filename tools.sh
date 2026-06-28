@@ -96,12 +96,35 @@ json() {
   jq -r "$1" "$CONFIG_FILE"
 }
 
-# Wrap a gum command so Ctrl+C (exit 130) always aborts, even inside
-# conditionals where set -e is disabled.
+# Run a gum command, aborting the script on Ctrl+C/ESC (exit 130).
+# Use instead of bare gum in ALL contexts — conditionals, subshells, etc.
 gum_or_abort() {
+  local out rc=0
+  out="$(gum "$@" 2>/dev/null)" || rc=$?
+  if (( rc == 130 )); then
+    exit 130
+  fi
+  if [[ -n "$out" ]]; then
+    printf '%s\n' "$out"
+  fi
+  return "$rc"
+}
+
+# Prompt for a value with gum, but abort on Ctrl+C. Returns the user's
+# input on stdout. If the user submits empty, stdout is empty (rc 0).
+prompt_or_abort() {
   local rc=0
-  gum "$@" || rc=$?
-  (( rc == 130 )) && exit 130
+  gum_or_abort "$@" || rc=$?
+  return "$rc"
+}
+
+# gum confirm that distinguishes No (return 1) from Ctrl+C (exit 130).
+confirm_or_abort() {
+  local rc=0
+  gum "$@" 2>/dev/null || rc=$?
+  if (( rc == 130 )); then
+    exit 130
+  fi
   return "$rc"
 }
 
