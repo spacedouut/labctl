@@ -9,6 +9,21 @@ source "$PHASE_DIR/cmds.sh"
 # Environment Variables
 
 
+cmd_update() {
+  local repo_dir="/opt/phase"
+  [[ -d "$repo_dir/.git" ]] || die "update requires a git checkout at $repo_dir"
+  need git
+
+  gum spin --show-error --title "Updating phase..." -- \
+    git -C "$repo_dir" pull --ff-only
+
+  # Re-run installer to refresh the symlink; config is preserved.
+  if [[ -f "$repo_dir/installer.sh" ]]; then
+    INSTALL_CONFIG=0 bash "$repo_dir/installer.sh"
+  fi
+}
+
+
 usage() {
   cat <<'EOF'
   phase - compute-engine style management for PVE.
@@ -42,6 +57,7 @@ main() {
       require_config
       cmd_vm "$@"
       ;;
+    update) cmd_update ;;
     help) usage ;;
     *) usage; die "Unknown command: $cmd" ;;
   esac
