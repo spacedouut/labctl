@@ -402,13 +402,26 @@ cmd_vm_bootstrap() {
 cmd_vm_connect() {
   local name="${1:-}"; shift || true
   [[ -n "$name" ]] || die "VM name is required"
-  local serial=0
+  local serial=0 key_check=1 user="" ip="" command="" ssh_args=()
   while (($#)); do
     case "$1" in
       --serial) serial=1; shift ;;
+      --user) user="${2:-}"; shift 2 ;;
+      --ip) ip="${2:-}"; shift 2 ;;
+      --no-key-check) key_check=0; shift ;;
+      --command) command="${2:-}"; shift 2 ;;
+      --) shift; ssh_args+=("$@"); break ;;
       *) die "unknown option: $1" ;;
     esac
   done
+  # --serial is incompatible with any SSH-specific flag.
+  if ((serial)); then
+    [[ -z "$user" ]] || die "--user is incompatible with --serial"
+    [[ -z "$ip" ]] || die "--ip is incompatible with --serial"
+    ((key_check)) || die "--no-key-check is incompatible with --serial"
+    [[ -z "$command" ]] || die "--command is incompatible with --serial"
+    ((${#ssh_args[@]} == 0)) || die "SSH passthrough args are incompatible with --serial"
+  fi
   local vmid
   vmid="$(vmid_by_name "$name")"
   if ((serial)); then
@@ -417,11 +430,19 @@ cmd_vm_connect() {
   local status
   status="$(qm status "$vmid" | awk '{print $2}')"
   [[ "$status" == "running" ]] || die "$name is $status; start it or use --serial"
-  local user ip
-  user="$(template_field "$vmid" ciuser)"
+  [[ -n "$user" ]] || user="$(template_field "$vmid" ciuser)"
   [[ -n "$user" ]] || user="$(json '.default_user // "root"')"
-  ip="$(best_guest_ip "$vmid")" || die "no guest-agent IPv4 found for $name; try --serial"
-  exec ssh "$user@$ip"
+  if [[ -z "$ip" ]]; then
+    ip="$(best_guest_ip "$vmid" || true)"
+  fi
+  [[ -n "$ip" ]] || die "no guest-agent IPv4 found for $name; try --ip or --serial"
+  if ((key_check)) && ! has_known_ssh_key "$vmid"; then
+    warn "no local /root/.ssh/*.pub key found in cloud-init sshkeys for $name"
+  fi
+  if [[ -n "$command" ]]; then
+    exec ssh "${ssh_args[@]}" "$user@$ip" "$command"
+  fi
+  exec ssh "${ssh_args[@]}" "$user@$ip"
 }
 
 cmd_vm_power() {

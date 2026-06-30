@@ -243,6 +243,29 @@ list_bridges() {
   ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}'
 }
 
+# Read local SSH public keys, one per line (just type+key, no comment).
+local_public_keys() {
+  local key
+  for key in /root/.ssh/*.pub; do
+    [[ -r "$key" ]] || continue
+    awk '{ print $1 " " $2 }' "$key"
+  done
+}
+
+# True if any local SSH key exists in the VM's cloud-init sshkeys.
+has_known_ssh_key() {
+  local vmid="$1" vm_keys local_key
+  vm_keys="$(vm_sshkeys_decoded "$vmid")"
+  [[ -n "$vm_keys" ]] || return 1
+  while read -r local_key; do
+    [[ -n "$local_key" ]] || continue
+    if grep -Fq "$local_key" <<<"$vm_keys"; then
+      return 0
+    fi
+  done < <(local_public_keys)
+  return 1
+}
+
 # Read a VM's current cloud-init sshkeys, URL-decoded, one per line.
 vm_sshkeys_decoded() {
   local vmid="$1" raw
