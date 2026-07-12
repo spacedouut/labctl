@@ -51,7 +51,7 @@ Will create:
   SSH keys: $(jq -r 'if (.ssh_keys // [] | length) > 0 then (.ssh_keys | join(",")) else "config + template defaults" end' <<<"$plan")
   Bootstrap: $(jq -r '[.bootstrap | to_entries[] | select(.value) | .key] | if length > 0 then join(",") else "none" end' <<<"$plan")
   Description: $(jq -r '.description // "none"' <<<"$plan")
-  VMID:     allocated at create time
+  VMID:     $(jq -r 'if .vmid and .vmid != 0 then "\(.vmid)" else "allocated at create time" end' <<<"$plan")
 EOF
 }
 
@@ -223,6 +223,8 @@ realize_plan() {
   local template vmid agent
   template="$(resolve_template "$size" "$os")"
   vmid="$(next_id)"
+  # Stamp the real VMID into the plan so the confirmation print shows it.
+  plan="$(jq --argjson vmid "$vmid" '.vmid = $vmid' <<<"$plan")"
   agent=0
   [[ "$(json '.vm.agent // true')" == "true" ]] && agent=1
 

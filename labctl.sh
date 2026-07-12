@@ -8,7 +8,7 @@ elif [[ -r /etc/labctl/config.json ]]; then
 else
   CONFIG_FILE="/root/labctl.config.json"
 fi
-QEMU_DIR="/etc/pve/nodes/homelab/qemu-server"
+QEMU_DIR="/etc/pve/nodes/$(hostname -s)/qemu-server"
 
 die() {
   printf 'labctl: %s\n' "$*" >&2

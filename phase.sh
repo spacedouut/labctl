@@ -9,6 +9,22 @@ source "$PHASE_DIR/cmds.sh"
 # Environment Variables
 
 
+cmd_templates() {
+  require_config
+  local f id name template_flag
+  printf '%-8s %s\n' 'VMID' 'Name'
+  printf '%-8s %s\n' '--------' '--------'
+  for f in "$QEMU_DIR"/*.conf; do
+    [[ -e "$f" ]] || continue
+    id="${f##*/}"; id="${id%.conf}"
+    name="$(vm_name "$id")"
+    [[ "$name" == tpl-* ]] || continue
+    template_flag="$(template_field "$id" template)"
+    [[ "$template_flag" == "1" ]] || continue
+    printf '%-8s %s\n' "$id" "$name"
+  done | sort -n
+}
+
 cmd_update() {
   local repo_dir="/opt/phase"
   [[ -d "$repo_dir/.git" ]] || die "update requires a git checkout at $repo_dir"
@@ -58,6 +74,7 @@ main() {
       cmd_vm "$@"
       ;;
     update) cmd_update ;;
+    templates) cmd_templates ;;
     help) usage ;;
     *) usage; die "Unknown command: $cmd" ;;
   esac
