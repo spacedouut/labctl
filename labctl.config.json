@@ -1,23 +1,43 @@
 {
-  "node": "pve",
-  "default_bridge": "vmbr0",
-  "default_user": "ubuntu",
-  "default_ssh_port": 22,
-  "envs": {
-    "prod": { "range": [100, 199], "description": "real workloads" },
-    "stag": { "range": [200, 299], "description": "staging" },
-    "dev": { "range": [300, 399], "description": "development" },
-    "infra": { "range": [400, 499], "description": "core infrastructure" },
-    "lab": { "range": [800, 899], "description": "experimental" },
-    "tmp": { "range": [900, 999], "description": "temporary / disposable" },
-    "tpl": { "range": [9000, 9099], "description": "templates" }
+  "naming": {
+    "pattern": "^[a-z][a-z0-9-]*$",
+    "max_length": 63,
+    "env_separator": "-"
   },
+
   "networks": {
-    "lan": ["192.168.0.0/16"]
+    "lan":  ["192.168.0.0/16"],
+    "mgmt": ["10.0.0.0/8"]
   },
+
+  "templates": {
+    "prefix": "tpl",
+    "separator": "-",
+    "sizes": {
+      "micro":  { "cores": 1, "memory": 1024 },
+      "small":  { "cores": 2, "memory": 2048 },
+      "medium": { "cores": 4, "memory": 4096 },
+      "large":  { "cores": 8, "memory": 8192 }
+    }
+  },
+
   "bootstrap": {
-    "system": "/opt/labctl/bootstrap/initialize_system.sh",
-    "docker": "/opt/labctl/bootstrap/initialize_docker.sh",
-    "tailscale": "/opt/labctl/bootstrap/initialize_tailscale.sh"
+    "directory": "/opt/labctl/bootstrap",
+    "os_overrides": {
+      "ubuntu-24-04-lts": { "system": "ubuntu/initialize_system.sh" },
+      "ubuntu-26-lts": { "system": "ubuntu/initialize_system.sh" },
+      "debian-12": { "system": "debian/initialize_system.sh" },
+      "arch": { "system": "arch/initialize_system.sh" },
+      "alpine-3-21": { "system": "alpine/initialize_system.sh" }
+    }
+  },
+
+  "vm": {
+    "agent": true,
+    "ssh_keys": ["/root/.ssh/id_ed25519.pub"]
+  },
+
+  "ui": {
+    "confirm_destructive": true
   }
 }
