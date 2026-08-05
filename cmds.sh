@@ -266,7 +266,7 @@ cmd_vm_provision() {
   local vmid name
   vmid="$(cmd_vm_create --vmidout "$@")"
   name="$(vm_name "$vmid")"
-  gum spin --title "Starting ${name}..." -- qm start "$vmid"
+  gum spin --title "Starting ${name}..." -- qm start "$vmid" >&2
   log "Waiting for guest agent on ${name}..."
   local ok=0
   for _ in {1..60}; do
@@ -309,8 +309,9 @@ realize_plan() {
   disk_store="$(jq -r '.disk.storage // empty' <<<"$plan")"
   local -a clone_args=("$template" "$vmid" --name "$name" --full 1)
   [[ -n "$disk_store" ]] && clone_args+=(--storage "$disk_store")
+  # Progress replay goes to stderr: stdout is reserved for the --vmidout contract.
   gum spin --show-error --title "Cloning ${name} (VMID ${vmid})..." -- \
-    qm clone "${clone_args[@]}"
+    qm clone "${clone_args[@]}" >&2
 
   # Core config: cpu/mem/onboot/agent/description/protection.
   local onboot protection description
@@ -321,7 +322,7 @@ realize_plan() {
     --agent "enabled=${agent}" --protection "$protection")
   [[ -n "$description" ]] && set_args+=(--description "$description")
   gum spin --show-error --title "Configuring ${name}..." -- \
-    qm set "$vmid" "${set_args[@]}"
+    qm set "$vmid" "${set_args[@]}" >&2
 
   # Network: rebuild net0 if a bridge or vlan was specified.
   local net_bridge net_vlan
@@ -350,7 +351,7 @@ realize_plan() {
       warn "requested disk ${disk_size} is not larger than current template disk; skipping resize"
     else
       gum spin --show-error --title "Resizing disk to ${disk_size}..." -- \
-        qm resize "$vmid" scsi0 "$disk_size"
+        qm resize "$vmid" scsi0 "$disk_size" >&2
     fi
   fi
 
