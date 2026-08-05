@@ -1,24 +1,18 @@
-# split script
-script is going to need way too many helpers; split it into two scripts like better-initramfs
-`tools.sh`
-`phase.sh`
+# phase v3
 
-# please pipefail
-please, for everyone's sake
+Mostly done:
+- [x] split into `tools.sh` / `cmds.sh` / `phase.sh`
+- [x] pipefail everywhere
+- [x] naming: user's own scheme, strictified (alphanumeric, lowercase, hyphens)
+- [x] templating: sizes defined in config, not in template names
+- [x] command renaming: `create` -> `provision` (kept both), `connect` -> `shell`
+- [x] noun-first grammar: `phase vm <name> <action>` (GCP-style), legacy
+      verb-first still works, bare `phase vm <name>` = shell
+- [x] new: `service`, `logs`, `exec`, `status`, `nextid`
+- [x] ported from v1: `tag`, `firewall`, `rename`, `destroy`
 
-
-# gum integration
- - more interactive uis using gum
-
-# naming
-let the user follow their own scheme but strictify it: alphanumeric, lowercase, hyphens only
-
-# templating
-no more individual template sizes; template sizes (specifically, CPU and memory) are defined in config first
-
-# command naming
-some commands are just qm wrappers, but a few names changed:
- - labctl vm create   -> phase vm provision
- - labctl vm connect  -> phase vm shell
-
-
+Still open:
+- [ ] live bootstrap test on a disposable tmp VM
+- [ ] `ui.confirm_destructive` wired into destructive paths
+- [ ] optional: `backup` (vzdump wrapper)
+- [ ] gum integration could go deeper (wizards for service/logs args)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PHASE_DIR="/opt/phase"
+PHASE_DIR="${PHASE_DIR:-/opt/phase}"
 source "$PHASE_DIR/tools.sh"
 source "$PHASE_DIR/cmds.sh"
 
@@ -45,22 +45,37 @@ usage() {
   phase - compute-engine style management for PVE.
 
   Example usage:
-  
-  phase vm plan --size micro --name postgres --disk 128GB local-lvm --os ubuntu-26-lts --save
-  phase vm create planned # create from temporarily saved plan
-  phase vm create postgres --vmidout # create, print only the VMID
-  phase vm start postgres
-  # Wait a moment...
-  phase vm shell postgres --serial
 
+  # Plan, then create (plan-first workflow):
+  phase vm plan --size micro --name postgres --os ubuntu-26 --save
+  phase vm create postgres --vmidout   # create from saved plan, print VMID
 
-  Full command list:
-    update, templates, vm 
+  # Per-VM operations (noun-first: name comes right after `vm`):
+  phase vm postgres                    # interactive SSH (default action)
+  phase vm postgres shell              # explicit SSH (alias: ssh)
+  phase vm postgres service nginx restart
+  phase vm postgres service sherpa-stt-gpu status --user   # user units
+  phase vm postgres logs --unit nginx -n 50 --follow
+  phase vm postgres exec -- uptime
+  phase vm postgres status
+  phase vm postgres start|stop|reboot|shutdown
+  phase vm postgres tag add db
+  phase vm postgres firewall add --from lan --port 6379
+  phase vm postgres rename postgresql
+  phase vm postgres destroy            # type the name to confirm
 
-  VM command list:
-    plan, provision, bootstrap, create, start, 
-    stop, reboot, reset, shutdown, shell, 
-    firewall, tag, rename, destroy, status, nextid
+  # Legacy verb-first form still works:
+  phase vm shell postgres
+  phase vm restart postgres
+
+  Commands:
+    update, templates, vm
+
+  VM actions:
+    plan, create, provision, nextid   (verb-first: phase vm <action> ...)
+    shell, ssh, exec, service, logs, status, start, stop, reboot, reset,
+    shutdown, pause, tag, firewall, rename, destroy, bootstrap
+                                    (noun-first: phase vm <name> <action>)
 
   Configure from /etc/phase.json
 EOF

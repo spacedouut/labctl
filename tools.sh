@@ -1,4 +1,5 @@
 
+# shellcheck shell=bash
 if [[ -n "${PHASE_CONFIG:-}" ]]; then
   CONFIG_FILE="$PHASE_CONFIG"
 elif [[ -r /etc/phase.json ]]; then
@@ -205,7 +206,8 @@ qga_exec() {
 
 # Upload a local script into the guest and run it with sudo.
 qga_run_script() {
-  local vmid="$1" script="$2" remote="/tmp/phase-$(basename "$script")"
+  local vmid="$1" script="$2" remote
+  remote="/tmp/phase-$(basename "$script")"
   [[ -r "$script" ]] || die "bootstrap script not readable: $script"
   qm guest exec "$vmid" --pass-stdin 1 -- bash -lc "cat > '$remote' && chmod +x '$remote'" < "$script" >/dev/null
   qga_exec "$vmid" bash -lc "sudo '$remote'"
@@ -241,6 +243,40 @@ disk_bytes() {
 # Network bridges on this node, one per line.
 list_bridges() {
   ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}'
+}
+
+# Current tag list of a VM (semicolon-separated), or empty.
+vm_tags() {
+  local vmid="$1"
+  template_field "$vmid" tags || true
+}
+
+validate_tag() {
+  local tag="$1"
+  [[ "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]*$ ]] || die "invalid tag: $tag"
+}
+
+# Normalize tag streams (; or newline separated) to a unique ;-joined line.
+normalize_tags() {
+  awk -v RS='[;\n]' 'NF && !seen[$0]++ { print }' | paste -sd ';' -
+}
+
+set_tags() {
+  local vmid="$1" tags="$2"
+  qm set "$vmid" --tags "$tags" >/dev/null
+}
+
+# Resolve "<user> <ip>" for a running VM, for SSH-based commands (service,
+# logs, exec). User comes from cloud-init ciuser, then config default_user.
+vm_ssh_user_ip() {
+  local name="$1" vmid user ip
+  vmid="$(vmid_by_name "$name")"
+  [[ "$(qm status "$vmid" | awk '{print $2}')" == "running" ]] || die "$name is not running"
+  user="$(template_field "$vmid" ciuser)"
+  [[ -n "$user" ]] || user="$(json '.default_user // "root"')"
+  ip="$(best_guest_ip "$vmid" || true)"
+  [[ -n "$ip" ]] || die "no guest-agent IPv4 found for $name"
+  printf '%s %s\n' "$user" "$ip"
 }
 
 # Read local SSH public keys, one per line (just type+key, no comment).
@@ -310,9 +346,12 @@ build_sshkeys_file() {
 }
 
 resolve_template() {
-  local size="$1" os="$2" template_name vmid
-  template_name="tpl-${os}"
-  vmid="$(vmid_by_name "$template_name")"
+  local size="$1" os="$2" prefix sep template_name vmid
+  prefix="$(json '.templates.prefix // "tpl"')"
+  sep="$(json '.templates.separator // "-"')"
+  template_name="${prefix}${sep}${os}"
+  vmid="$(vmid_by_name "$template_name" 2>/dev/null)"
+  [[ -n "$vmid" ]] || die "template not found: $template_name (create it or pass a different --os)"
   [[ "$(template_field "$vmid" template)" == "1" ]] || die "$template_name exists at VMID $vmid but is not marked as a template"
   printf '%s\n' "$vmid"
 }

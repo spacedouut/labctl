@@ -5,6 +5,8 @@
     "env_separator": "-"
   },
 
+  "default_user": "ubuntu",
+
   "networks": {
     "lan":  ["192.168.0.0/16"],
     "mgmt": ["10.0.0.0/8"]
@@ -22,10 +24,9 @@
   },
 
   "bootstrap": {
-    "directory": "/opt/labctl/bootstrap",
+    "directory": "/opt/phase/bootstrap",
     "os_overrides": {
-      "ubuntu-24-04-lts": { "system": "ubuntu/initialize_system.sh" },
-      "ubuntu-26-lts": { "system": "ubuntu/initialize_system.sh" },
+      "ubuntu-26": { "system": "ubuntu/initialize_system.sh" },
       "debian-12": { "system": "debian/initialize_system.sh" },
       "arch": { "system": "arch/initialize_system.sh" },
       "alpine-3-21": { "system": "alpine/initialize_system.sh" }

@@ -1,14 +1,21 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://github.com/spacedouut/labctl/config.schema.json",
-  "title": "labctl / phase configuration",
-  "description": "Configuration schema for labctl (phase) — a CLI tool for managing Proxmox VE virtual machines",
+  "$id": "https://github.com/spacedouut/phase/config.schema.json",
+  "title": "phase configuration",
+  "description": "Configuration schema for phase — a CLI tool for managing Proxmox VE virtual machines",
 
   "type": "object",
   "additionalProperties": false,
   "required": [],
 
   "properties": {
+    "default_user": {
+      "description": "SSH user used when a VM's cloud-init ciuser is not set. VMs created from phase templates inherit ciuser from the template",
+      "type": "string",
+      "default": "root",
+      "examples": ["ubuntu", "root"]
+    },
+
     "naming": {
       "description": "Naming conventions for VMs and resources. Names are auto-validated against these rules",
       "type": "object",

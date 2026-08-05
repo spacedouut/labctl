@@ -1,33 +1,98 @@
+# shellcheck shell=bash
+# phase vm dispatch — hybrid grammar:
+#   verb-first (creation/queries): phase vm plan|create|provision|nextid ...
+#   noun-first (per-VM ops):       phase vm <name> <action> ...
+#   legacy verb-first still works: phase vm <action> <name> ...
+#   bare name:                     phase vm <name>            -> shell
+
+VERB_FIRST_ACTIONS="plan create provision nextid"
+NAMED_ACTIONS="shell ssh connect exec service logs status start stop reboot reset shutdown pause tag firewall rename destroy bootstrap"
+
+is_verb_first()  { [[ " $VERB_FIRST_ACTIONS " == *" $1 "* ]]; }
+is_named_action(){ [[ " $NAMED_ACTIONS " == *" $1 "* ]]; }
 
 cmd_vm() {
-  local sub="${1:-}"; shift || true
-    case "$sub" in
-    plan) cmd_vm_plan "$@" ;;
-    create) cmd_vm_create "$@" ;;
-    provision) cmd_vm_provision "$@" ;;
-    shell) cmd_vm_connect "$@" ;;
-    bootstrap) cmd_vm_bootstrap "$@" ;;
-    start|stop|reboot|reset|shutdown|pause) cmd_vm_power "$sub" "$@" ;;
-    firewall)
-      local fw_sub="${1:-}"; shift || true
-      case "$fw_sub" in
-        add) cmd_vm_firewall_add "$@" ;;
-        *) usage; die "unknown vm firewall command: $fw_sub" ;;
-      esac
-      ;;
-    tag)
-      local tag_sub="${1:-}"; shift || true
-      case "$tag_sub" in
-        list) cmd_vm_tag_list "$@" ;;
-        add) cmd_vm_tag_add "$@" ;;
-        remove|rm) cmd_vm_tag_remove "$@" ;;
-        set) cmd_vm_tag_set "$@" ;;
-        *) usage; die "unknown vm tag command: $tag_sub" ;;
-      esac
-      ;;
-    rename) cmd_vm_rename "$@" ;;
-    destroy) cmd_vm_destroy "$@" ;;
-    *) usage; die "unknown vm command: $sub" ;;
+  local first="${1:-}"; shift || true
+
+  if is_verb_first "$first"; then
+    case "$first" in
+      plan)      cmd_vm_plan "$@" ;;
+      create)    cmd_vm_create "$@" ;;
+      provision) cmd_vm_provision "$@" ;;
+      nextid)    cmd_vm_nextid "$@" ;;
+    esac
+    return
+  fi
+
+  # legacy verb-first: phase vm <action> <name> ...
+  if [[ -n "$first" ]] && is_named_action "$first"; then
+    [[ -n "${1:-}" ]] || die "vm: missing VM name after '$first'"
+    case "$first" in
+      tag)      [[ -n "${2:-}" ]] || die "usage: phase vm tag <list|add|remove|set> <name> ..."
+                cmd_vm_tag "${2}" "${1}" "${@:3}" ;;
+      firewall) [[ -n "${2:-}" ]] || die "usage: phase vm firewall <add> <name> ..."
+                cmd_vm_firewall "${2}" "${1}" "${@:3}" ;;
+      *) cmd_vm_named "$1" "$first" "${@:2}" ;;
+    esac
+    return
+  fi
+
+  # noun-first: phase vm <name> <action> ...
+  if [[ -n "$first" && -n "${1:-}" ]] && is_named_action "${1:-}"; then
+    local name="$first" action="$1"
+    shift || true   # drop the action token; $1 is guaranteed non-empty above
+    cmd_vm_named "$name" "$action" "$@"
+    return
+  fi
+
+  # bare name -> shell
+  if [[ -n "$first" ]]; then
+    if [[ -z "${1:-}" ]]; then
+      cmd_vm_named "$first" shell
+      return
+    fi
+    usage; die "unknown vm action: ${1:-}"
+  fi
+
+  usage; die "vm: missing VM name or command"
+}
+
+cmd_vm_named() {
+  local name="${1:-}" action="${2:-}"
+  shift 2 || true
+  [[ -n "$name" && -n "$action" ]] || { usage; die "vm: name and action required"; }
+  case "$action" in
+    shell|ssh|connect) cmd_vm_connect "$name" "$@" ;;
+    exec)   cmd_vm_exec "$name" "$@" ;;
+    service) cmd_vm_service "$name" "$@" ;;
+    logs)   cmd_vm_logs "$name" "$@" ;;
+    status) cmd_vm_status "$name" ;;
+    start|stop|reboot|reset|shutdown|pause) cmd_vm_power "$action" "$name" ;;
+    bootstrap) cmd_vm_bootstrap "$name" "$@" ;;
+    tag)     cmd_vm_tag "$name" "$@" ;;
+    firewall) cmd_vm_firewall "$name" "$@" ;;
+    rename)  cmd_vm_rename "$name" "${1:-}" ;;
+    destroy) cmd_vm_destroy "$name" "$@" ;;
+    *) usage; die "unknown vm action: $action" ;;
+  esac
+}
+
+cmd_vm_tag() {
+  local name="$1" sub="${2:-}"; shift 2 || true
+  case "$sub" in
+    list)    cmd_vm_tag_list "$name" ;;
+    add)     cmd_vm_tag_add "$name" "${1:-}" ;;
+    remove|rm) cmd_vm_tag_remove "$name" "${1:-}" ;;
+    set)     cmd_vm_tag_set "$name" "$@" ;;
+    *) usage; die "unknown vm tag command: $sub" ;;
+  esac
+}
+
+cmd_vm_firewall() {
+  local name="$1" sub="${2:-}"; shift 2 || true
+  case "$sub" in
+    add) cmd_vm_firewall_add "$name" "$@" ;;
+    *) usage; die "unknown vm firewall command: $sub" ;;
   esac
 }
 
@@ -96,7 +161,11 @@ gather_plan() {
     require_tty "missing required fields (name/size/os)"
   fi
   [[ -n "$name" ]] || name="$(gum input --header "VM name" --placeholder "postgres")"
-  [[ -n "$size" ]] || size="$(choose_or_die "Size" $(jq -r '.templates.sizes | keys[]' "$CONFIG_FILE"))"
+  [[ -n "$size" ]] || {
+    local -a size_opts=()
+    mapfile -t size_opts < <(jq -r '.templates.sizes | keys[]' "$CONFIG_FILE")
+    size="$(choose_or_die "Size" "${size_opts[@]}")"
+  }
   if [[ -z "$os" ]]; then
     local -a tpls=()
     mapfile -t tpls < <(list_template_oses)
@@ -311,10 +380,6 @@ realize_plan() {
   printf '%s\n' "$vmid"
 }
 
-# create [<name>] [flags]
-#   - saved plan named <name> (or "planned") exists -> consume it
-#   - otherwise -> build from flags, gum-filling any missing required field
-#   - missing fields with no TTY -> gather_plan dies
 # create [<name>] [flags] [--vmidout]
 #   - saved plan named <name> (or "planned") exists -> consume it
 #   - otherwise -> build from flags, gum-filling any missing required field
@@ -461,4 +526,190 @@ cmd_vm_power() {
     pause) qm suspend "$vmid" ;;
     *) die "unknown power action: $action" ;;
   esac
+}
+
+# New noun-first commands
+
+cmd_vm_nextid() {
+  next_id
+}
+
+cmd_vm_status() {
+  local name="$1" vmid
+  vmid="$(vmid_by_name "$name")"
+  printf 'Name:   %s\n' "$name"
+  printf 'VMID:   %s\n' "$vmid"
+  printf 'State:  %s\n' "$(qm status "$vmid" | awk '{print $2}')"
+  printf 'IP:     %s\n' "$(best_guest_ip "$vmid" || printf 'unknown')"
+  printf 'Tags:   %s\n' "$(vm_tags "$vmid")"
+  printf 'Cores:  %s\n' "$(template_field "$vmid" cores)"
+  printf 'Memory: %s MB\n' "$(template_field "$vmid" memory)"
+  printf 'Agent:  %s\n' "$(template_field "$vmid" agent)"
+  printf 'Onboot: %s\n' "$(template_field "$vmid" onboot)"
+}
+
+# phase vm <name> service <unit> <action> [--user]
+cmd_vm_service() {
+  local name="$1" unit="${2:-}" action="${3:-}" arg user_units=0
+  [[ -n "$unit" && -n "$action" ]] || die "usage: phase vm <name> service <unit> <start|stop|restart|reload|enable|disable|status|is-active|is-enabled> [--user]"
+  shift 3 || true
+  for arg in "$@"; do
+    case "$arg" in
+      --user) user_units=1 ;;
+      *) die "unknown option: $arg" ;;
+    esac
+  done
+  case "$action" in
+    start|stop|restart|reload|enable|disable|status|is-active|is-enabled) ;;
+    *) die "unknown service action: $action" ;;
+  esac
+  local user ip
+  read -r user ip < <(vm_ssh_user_ip "$name")
+  local -a sys=(systemctl --no-pager)
+  ((user_units)) && sys+=(--user)
+  exec ssh "$user@$ip" "${sys[@]}" "$action" "$unit"
+}
+
+# phase vm <name> logs [-u|--unit <unit>] [-n|--lines <n>] [-f|--follow]
+cmd_vm_logs() {
+  local name="$1"; shift
+  local unit="" lines="50" follow=0
+  while (($#)); do
+    case "$1" in
+      -u|--unit) unit="${2:-}"; shift 2 ;;
+      -n|--lines) lines="${2:-}"; shift 2 ;;
+      -f|--follow) follow=1; shift ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  local user ip
+  read -r user ip < <(vm_ssh_user_ip "$name")
+  local -a args=(journalctl --no-pager -n "$lines")
+  [[ -n "$unit" ]] && args+=(-u "$unit")
+  ((follow)) && args+=(-f)
+  exec ssh "$user@$ip" "${args[@]}"
+}
+
+# phase vm <name> exec -- <command...>
+cmd_vm_exec() {
+  local name="$1"; shift
+  [[ "${1:-}" == "--" ]] && shift
+  (($#)) || die "usage: phase vm <name> exec -- <command...>"
+  local user ip
+  read -r user ip < <(vm_ssh_user_ip "$name")
+  exec ssh "$user@$ip" "$@"
+}
+
+# Ported from labctl v1, adapted to v2/v3 config.
+
+cmd_vm_firewall_add() {
+  local name="$1"; shift
+  local from="" port="" proto="tcp"
+  while (($#)); do
+    case "$1" in
+      --from) from="${2:-}"; shift 2 ;;
+      --port) port="${2:-}"; shift 2 ;;
+      --proto) proto="${2:-}"; shift 2 ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  [[ -n "$from" && -n "$port" ]] || die "--from and --port are required"
+  [[ "$proto" == "tcp" || "$proto" == "udp" ]] || die "--proto must be tcp or udp"
+  local vmid cidrs cidr
+  vmid="$(vmid_by_name "$name")"
+  if jq -e --arg from "$from" '.networks[$from] != null' "$CONFIG_FILE" >/dev/null; then
+    mapfile -t cidrs < <(jq -r --arg from "$from" '.networks[$from][]' "$CONFIG_FILE")
+    ((${#cidrs[@]})) || die "network alias has no CIDRs configured: $from"
+  else
+    cidrs=("$from")
+  fi
+  for cidr in "${cidrs[@]}"; do
+    qga_exec "$vmid" sudo ufw allow from "$cidr" to any port "$port" proto "$proto"
+  done
+}
+
+cmd_vm_tag_list() {
+  local name="$1" tags
+  tags="$(vm_tags "$(vmid_by_name "$name")")"
+  [[ -n "$tags" ]] || return 0
+  tr ';' '\n' <<<"$tags"
+}
+
+cmd_vm_tag_add() {
+  local name="$1" tag="${2:-}"
+  [[ -n "$tag" ]] || die "tag is required"
+  validate_tag "$tag"
+  local vmid existing next
+  vmid="$(vmid_by_name "$name")"
+  existing="$(vm_tags "$vmid")"
+  next="$(printf '%s\n%s\n' "${existing//;/ }" "$tag" | tr ' ' '\n' | normalize_tags)"
+  set_tags "$vmid" "$next"
+  log "$next"
+}
+
+cmd_vm_tag_remove() {
+  local name="$1" tag="${2:-}"
+  [[ -n "$tag" ]] || die "tag is required"
+  validate_tag "$tag"
+  local vmid existing next
+  vmid="$(vmid_by_name "$name")"
+  existing="$(vm_tags "$vmid")"
+  next="$(tr ';' '\n' <<<"$existing" | awk -v tag="$tag" 'NF && $0 != tag { print }' | normalize_tags)"
+  set_tags "$vmid" "$next"
+  log "$next"
+}
+
+cmd_vm_tag_set() {
+  local name="$1"; shift
+  (($#)) || die "at least one tag is required"
+  local vmid tag
+  vmid="$(vmid_by_name "$name")"
+  for tag in "$@"; do
+    validate_tag "$tag"
+  done
+  local next
+  next="$(printf '%s\n' "$@" | normalize_tags)"
+  set_tags "$vmid" "$next"
+  log "$next"
+}
+
+cmd_vm_rename() {
+  local name="$1" new_name="${2:-}"
+  [[ -n "$new_name" ]] || die "usage: phase vm <name> rename <new-name>"
+  validate_name "$new_name"
+  local vmid
+  vmid="$(vmid_by_name "$name")"
+  qm set "$vmid" --name "$new_name" >/dev/null
+  log "$name -> $new_name (VMID $vmid)"
+}
+
+cmd_vm_destroy() {
+  local name="$1"; shift || true
+  local force=0
+  while (($#)); do
+    case "$1" in
+      --force) force=1; shift ;;
+      *) die "unknown option: $1" ;;
+    esac
+  done
+  local vmid status tags confirm
+  vmid="$(vmid_by_name "$name")"
+  status="$(qm status "$vmid" | awk '{print $2}')"
+  tags="$(vm_tags "$vmid")"
+  cat >&2 <<EOF
+Will destroy:
+  Name: $name
+  VMID: $vmid
+  Status: $status
+  Tags: ${tags:-none}
+EOF
+  if ((force)); then
+    [[ "$name" =~ ^tmp- || "$name" =~ ^lab- ]] || die "--force is only allowed for tmp-* or lab-* VMs"
+  else
+    printf 'Type %s to permanently destroy this VM: ' "$name" >&2
+    read -r confirm || true
+    [[ "$confirm" == "$name" ]] || die "confirmation did not match; aborting"
+  fi
+  qm stop "$vmid" --skiplock 1 >/dev/null 2>&1 || true
+  qm destroy "$vmid" --purge 1
 }
