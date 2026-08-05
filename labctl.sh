@@ -395,7 +395,8 @@ qga_exec() {
 }
 
 qga_run_script() {
-  local vmid="$1" script="$2" remote="/tmp/labctl-$(basename "$script")"
+  local vmid="$1" script="$2" remote
+  remote="/tmp/labctl-$(basename "$script")"
   [[ -r "$script" ]] || die "bootstrap script not readable: $script"
   qm guest exec "$vmid" --pass-stdin 1 -- bash -lc "cat > '$remote' && chmod +x '$remote'" < "$script" >/dev/null
   qga_exec "$vmid" bash -lc "sudo '$remote'"
@@ -664,12 +665,17 @@ cmd_vm() {
 
 cmd_update() {
   local repo_dir="/opt/labctl"
-  local installer="$repo_dir/install-labctl.sh"
   [[ -d "$repo_dir/.git" ]] || die "update requires a git checkout at $repo_dir"
-  [[ -x "$installer" || -f "$installer" ]] || die "installer not found at $installer"
   need git
-  git -C "$repo_dir" pull --ff-only
-  INSTALL_CONFIG=0 bash "$installer"
+
+  # labctl was rewritten as phase; update migrates the checkout to v3.
+  git -C "$repo_dir" fetch origin
+  git -C "$repo_dir" checkout -B v3 origin/v3
+
+  if [[ -f "$repo_dir/installer.sh" ]]; then
+    INSTALL_CONFIG=0 bash "$repo_dir/installer.sh"
+  fi
+  printf 'labctl is now phase. Try: phase vm <name> shell\n' >&2
 }
 
 main() {

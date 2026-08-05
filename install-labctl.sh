@@ -1,26 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PREFIX="${PREFIX:-/usr/local}"
-BIN_DIR="${BIN_DIR:-$PREFIX/bin}"
-CONFIG_DIR="${CONFIG_DIR:-/etc/labctl}"
-CONFIG_FILE="${CONFIG_FILE:-$CONFIG_DIR/config.json}"
-REPO_URL="${REPO_URL:-https://github.com/spacedouut/labctl.git}"
-REF="${REF:-main}"
-WORK_DIR="${WORK_DIR:-/opt/labctl}"
-LABCTL_FILE="${LABCTL_FILE:-labctl.sh}"
-INSTALL_BINARY="${INSTALL_BINARY:-1}"
-INSTALL_CONFIG="${INSTALL_CONFIG:-1}"
-if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-  SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-else
-  SOURCE_DIR=""
-fi
+# labctl v1 installer — now a migration shim.
+#
+# labctl was rewritten as `phase` (the v3 branch, now the default branch).
+# Existing labctl installs reach this script via `labctl update` (the
+# wrapper re-runs it after every git pull). It switches the /opt/labctl
+# checkout to v3 and hands off to the phase installer, which installs
+# /usr/local/bin/phase and preserves any existing config.
 
-install_file() {
-  local src="$1" dest="$2" mode="$3"
-  install -D -m "$mode" "$src" "$dest"
-}
+PREFIX="${PREFIX:-/usr/local}"
+WORK_DIR="${WORK_DIR:-/opt/labctl}"
 
 require_root() {
   if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
@@ -31,47 +21,20 @@ require_root() {
 
 main() {
   require_root
+  command -v git >/dev/null || { echo "missing git; install git first" >&2; exit 1; }
 
-  command -v bash >/dev/null || { echo "missing bash" >&2; exit 1; }
-  command -v jq >/dev/null || { echo "missing jq; install jq first" >&2; exit 1; }
-  command -v qm >/dev/null || { echo "missing qm; run this on a Proxmox host" >&2; exit 1; }
-
-  if [[ ! -f "$SOURCE_DIR/$LABCTL_FILE" ]]; then
-    command -v git >/dev/null || { echo "missing git; install git first" >&2; exit 1; }
-    if [[ -f "$WORK_DIR/$LABCTL_FILE" ]]; then
-      echo "Using existing checkout: $WORK_DIR"
-    else
-      echo "Cloning $REPO_URL into $WORK_DIR"
-      rm -rf "$WORK_DIR"
-      git clone --depth 1 --branch "$REF" "$REPO_URL" "$WORK_DIR"
-    fi
-    SOURCE_DIR="$WORK_DIR"
+  if [[ ! -d "$WORK_DIR/.git" ]]; then
+    echo "no checkout at $WORK_DIR; run the phase installer directly:" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/spacedouut/phase/refs/heads/v3/installer.sh | bash" >&2
+    exit 1
   fi
 
-  [[ -f "$SOURCE_DIR/$LABCTL_FILE" ]] || { echo "missing $LABCTL_FILE in $SOURCE_DIR" >&2; exit 1; }
+  echo "labctl: migrating checkout to phase v3..." >&2
+  git -C "$WORK_DIR" fetch origin
+  git -C "$WORK_DIR" checkout -B v3 origin/v3
 
-  if [[ "$INSTALL_BINARY" == "1" ]]; then
-    install_file "$SOURCE_DIR/$LABCTL_FILE" "$BIN_DIR/labctl" 0755
-  fi
-
-  if [[ "$INSTALL_CONFIG" == "1" ]]; then
-    if [[ -f "$CONFIG_FILE" ]]; then
-      echo "Keeping existing config: $CONFIG_FILE"
-    elif [[ -f "$SOURCE_DIR/labctl.config.json" ]]; then
-      install_file "$SOURCE_DIR/labctl.config.json" "$CONFIG_FILE" 0644
-      echo "Installed default config: $CONFIG_FILE"
-    else
-      echo "No labctl.config.json found next to installer; skipping config install" >&2
-    fi
-  fi
-
-  if [[ "$INSTALL_BINARY" == "1" ]]; then
-    echo "Installed: $BIN_DIR/labctl"
-  fi
-  echo
-  echo "Try:"
-  echo "  labctl templates list"
-  echo "  labctl vm plan redis --env tmp --size micro --os ubuntu-26-lts"
+  # Hand off to the v3 installer (INSTALL_CONFIG carries through the env).
+  exec bash "$WORK_DIR/installer.sh" "$@"
 }
 
 main "$@"
