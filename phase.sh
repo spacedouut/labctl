@@ -30,8 +30,11 @@ cmd_update() {
   [[ -d "$repo_dir/.git" ]] || die "update requires a git checkout at $repo_dir"
   need git
 
-  gum spin --show-error --title "Updating phase..." -- \
-    git -C "$repo_dir" pull --ff-only
+  # Migrate to the v3 branch (the rewrite / default branch).
+  gum spin --show-error --title "Updating phase to v3..." -- \
+    git -C "$repo_dir" fetch origin --quiet
+
+  git -C "$repo_dir" checkout -B v3 origin/v3
 
   # Re-run installer to refresh the symlink; config is preserved.
   if [[ -f "$repo_dir/installer.sh" ]]; then
