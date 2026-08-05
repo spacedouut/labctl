@@ -11,6 +11,14 @@ echo "== Proxmox Ubuntu Headless Template Setup =="
 
 export DEBIAN_FRONTEND=noninteractive
 
+# Cloned VMs race cloud-init's netplan write against networkd's first boot;
+# when cloud-init loses, systemd-networkd-wait-online hangs and the guest has
+# no network. Disable the boot hang and re-apply network config before apt
+# needs it. Network comes back with DHCP shortly after.
+systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
+systemctl restart systemd-networkd 2>/dev/null || true
+sleep 3
+
 echo "== Setting timezone =="
 timedatectl set-timezone "$TIMEZONE"
 

@@ -275,6 +275,17 @@ cmd_vm_provision() {
   done
   ((ok)) || die "guest agent never came up on ${name}"
 
+  # Guest may boot with no network (cloud-init/networkd-wait-online race) —
+  # wait for a real IP BEFORE bootstrap starts, while the agent is still
+  # free (qemu-ga serializes commands; an apt exec would block this check).
+  log "Waiting for guest network on ${name}..."
+  local net_ok=0
+  for _ in {1..45}; do
+    if [[ -n "$(guest_ipv4s "$vmid" | head -1)" ]]; then net_ok=1; break; fi
+    sleep 2
+  done
+  ((net_ok)) || die "guest never got an IP on ${name} (networkd-wait-online stuck?)"
+
   # Forward --os to bootstrap (it drives the script set). With no saved plan
   # file, bootstrap has no other way to learn the OS.
   local os=""
