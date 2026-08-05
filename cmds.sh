@@ -274,7 +274,17 @@ cmd_vm_provision() {
     sleep 2
   done
   ((ok)) || die "guest agent never came up on ${name}"
-  cmd_vm_bootstrap "$name"
+
+  # Forward --os to bootstrap (it drives the script set). With no saved plan
+  # file, bootstrap has no other way to learn the OS.
+  local os=""
+  while (($#)); do
+    case "$1" in
+      --os) os="${2:-}"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+  cmd_vm_bootstrap "$name" ${os:+--os "$os"}
 }
 
 # Clone + configure a VM from a plan JSON (passed as $1). Allocates the VMID
