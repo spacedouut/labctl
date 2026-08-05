@@ -12,7 +12,10 @@ Mostly done:
 - [x] ported from v1: `tag`, `firewall`, `rename`, `destroy`
 
 Still open:
-- [ ] live bootstrap test on a disposable tmp VM
-- [ ] `ui.confirm_destructive` wired into destructive paths
 - [ ] optional: `backup` (vzdump wrapper)
 - [ ] gum integration could go deeper (wizards for service/logs args)
+- [ ] template regeneration: tpl-ubuntu-26 still has the networkd-wait-online
+      boot hang (provision recovers it, but the template itself should be
+      rebuilt from a bootstrapped VM: clone 9001 -> provision -> snapshot)
+- [ ] ssh known_hosts staleness on reused DHCP IPs (maybe ssh-keygen -R on
+      destroy, or a --no-key-check style flag for service/exec/logs)
