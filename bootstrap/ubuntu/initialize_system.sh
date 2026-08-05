@@ -76,7 +76,10 @@ MaxAuthTries 3
 EOF
 
 sshd -t
-systemctl reload ssh || systemctl reload sshd
+# sshd may be socket-activated (ssh.socket) on newer Ubuntu: the unit exists
+# but isn't active, so reload can fail. Config was validated above and applies
+# on the next connection regardless — never let this kill the script.
+systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
 
 echo "== Configuring UFW firewall =="
 ufw --force reset
