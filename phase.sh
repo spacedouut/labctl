@@ -23,8 +23,9 @@ cmd_templates() {
     rows+=("$id | $name")
   done
   if have_tty; then
-    gum table --border rounded --separator " " <<<"VMID | Name
-$(printf '%s\n' "${rows[@]}" | sort -n)"
+    { printf '%-8s %s\n' 'VMID' 'Name'
+      printf '%s\n' "${rows[@]}" | sort -n | awk -F' \\| ' '{printf "%-8s %s\n", $1, $2}'
+    } | gum style --border rounded --padding "0 2"
   else
     printf '%-8s %s\n' 'VMID' 'Name'
     printf '%-8s %s\n' '--------' '--------'

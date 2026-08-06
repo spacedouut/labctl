@@ -581,25 +581,31 @@ cmd_vm_status() {
     return
   fi
 
-  local state_fg=1
+  local state_fg=1 esc
   case "$state" in
     running) state_fg=2 ;;
     stopped) state_fg=3 ;;
   esac
-  local state_styled tags_styled
-  state_styled="$(gum style --foreground "$state_fg" --bold "$state")"
-  tags_styled="$(gum style --foreground 6 "${tags:-none}")"
+  esc=$'\033'
+  local state_ansi tags_ansi
+  state_ansi="${esc}[${state_fg}m${state}${esc}[0m"
+  if [[ -n "$tags" ]]; then
+    tags_ansi="${esc}[36m${tags}${esc}[0m"
+  else
+    tags_ansi="none"
+  fi
 
   gum style --border rounded --padding "0 4" --align center --width 52 \
     "$(gum join --horizontal "$(gum style --bold "$name")" "$(gum style --faint "  ·  VMID $vmid")")"
-  gum table --border rounded --separator " " <<<"Property | Value
-State    | $state_styled
-IP       | $ip
-Tags     | $tags_styled
-Cores    | $cores
-Memory   | $mem MB
-Agent    | $agent
-Onboot   | $onboot"
+  printf '%-10s %s\n' \
+    'State' "$state_ansi" \
+    'IP' "$ip" \
+    'Tags' "$tags_ansi" \
+    'Cores' "$cores" \
+    'Memory' "$mem MB" \
+    'Agent' "$agent" \
+    'Onboot' "$onboot" \
+    | gum style --border rounded --padding "0 2" --width 52
 }
 
 # phase vm <name> service <unit> <action> [--user]
