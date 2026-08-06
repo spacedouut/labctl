@@ -1,100 +1,135 @@
-# labctl
-simple commandline tool for managing PVE nodes similar to GCP Compute Engine.
+# phase
 
-`labctl` wraps common `qm` workflows for VM naming, VMID allocation, template cloning, SSH access, guest-agent commands, UFW rules, tags, and guarded deletes.
+Compute-engine style management for Proxmox VE, in the spirit of GCP Compute Engine. `phase` wraps common `qm` workflows: plan-based provisioning, naming, VMID allocation, template cloning, SSH access, guest-agent commands, UFW rules, tags, service management, and guarded deletes.
 
 ## Install
 
-Run on PVE host:
+Run on the PVE host:
 
-```curl -fsSL https://raw.githubusercontent.com/spacedouut/labctl/refs/heads/main/install-labctl.sh | bash```
+```bash
+curl -fsSL https://raw.githubusercontent.com/spacedouut/phase/refs/heads/v3/installer.sh | bash
+```
+
+Installs to:
+
+```
+/opt/phase        # git checkout (update with `phase update`)
+/usr/local/bin/phase  # symlink to /opt/phase/phase.sh
+/etc/phase.json   # configuration
+```
+
+## Grammar
+
+Two command shapes, both valid:
+
+```bash
+# verb-first — creating things
+phase vm plan|create|provision|nextid ...
+
+# noun-first — operating on an existing VM (the default when the first
+# token isn't a reserved action word)
+phase vm <name> <action> ...
+```
+
+Legacy verb-first calls (`phase vm shell postgres`) keep working — reserved
+action words win as the first token, anything else is a VM name.
+
+## Common Commands
+
+```shell
+# Update from git and reinstall the wrapper only:
+phase update
+
+# List templates / find the next free VMID:
+phase templates
+phase vm nextid
+
+# Plan a VM (prints what it will do; --save keeps the plan):
+phase vm plan --size small --name postgres --os ubuntu-26 --save
+
+# Create a VM from the saved plan (--vmidout prints just the VMID):
+phase vm create postgres --vmidout
+
+# Create + start + bootstrap (system scripts; --docker/--tailscale add steps):
+phase vm provision app --size medium --os ubuntu-26 --docker --tailscale
+
+# Per-VM operations:
+phase vm postgres                 # interactive SSH (default action)
+phase vm postgres shell           # SSH (alias: ssh)
+phase vm postgres exec -- uptime  # one-shot SSH command
+phase vm postgres service nginx restart        # systemd unit management
+phase vm postgres service sherpa-stt-gpu status --user
+phase vm postgres logs --unit nginx -n 50      # journald (--follow to tail)
+phase vm postgres status          # VMID, state, IP, tags, resources
+phase vm postgres start|stop|reboot|shutdown|pause
+phase vm postgres tag add db
+phase vm postgres tag list
+phase vm postgres firewall add --from lan --port 6379
+phase vm postgres rename postgresql
+phase vm postgres destroy         # type the name to confirm (--force: tmp-*/lab-*)
+```
 
 ## Naming
-VM names go by `environment-name-instance`. For example, `prod-homeassistant-1`, `tmp-redis-1`, `lab-minecraft-2`, etc...
 
-Templates are resolved by Proxmox VM name:
-```
-tpl-<size>-<os>
-```
-So, for example:
-```
-tpl-micro-ubuntu-26-lts
-tpl-small-ubuntu-26-lts
-tpl-medium-ubuntu-26-lts
-tpl-large-ubuntu-26-lts
-```
+Names are lowercase alphanumeric + hyphens, validated against the config
+(`naming.pattern`, default `^[a-z][a-z0-9-]*$`, max 63 chars). Follow your own
+scheme — `prod-redis-1`, `tmp-smoke-test`, `hermes`, all fine.
 
-installs to:
+Templates are resolved by Proxmox VM name as `<prefix>-<os>`, e.g.:
 
 ```
-/opt/labctl # repo for updating
-/usr/local/bin/labctl # actual binary / script
-/etc/labctl/config.json # configuration
+tpl-ubuntu-26
+tpl-debian-12
 ```
+
+The prefix/separator come from config (`templates.prefix`/`separator`).
 
 ## Config
 
-/etc/labctl/config.json defines local policy such as:
+`/etc/phase.json` defines local policy:
 
-- VMID ranges by environment
-- Network aliases like lan
-- Default SSH user
-- Bootstrap script paths
+- `default_user` — SSH user when the VM has no cloud-init `ciuser` (e.g. `ubuntu`)
+- `networks` — aliases for firewall rules and best-IP selection (`mgmt`, `lan`...)
+- `templates.sizes` — named resource sizes (cores/memory) validated by `--size`
+- `bootstrap.directory` + `os_overrides` — per-OS bootstrap script paths
+- `vm.agent` / `vm.ssh_keys` — defaults for new VMs (guest agent, SSH keys)
+- `ui.confirm_destructive` — reserved for destructive confirmations
 
-Example network alias:
+Example:
+
 ```json
-"networks": {
-  "lan": ["192.168.0.0/16"]
+{
+  "default_user": "ubuntu",
+  "networks": { "lan": ["192.168.0.0/16"], "mgmt": ["10.0.0.0/8"] },
+  "templates": {
+    "sizes": {
+      "micro":  { "cores": 1, "memory": 1024 },
+      "small":  { "cores": 2, "memory": 2048 }
+    }
+  },
+  "bootstrap": {
+    "directory": "/opt/phase/bootstrap",
+    "os_overrides": {
+      "ubuntu-26": { "system": "ubuntu/initialize_system.sh" }
+    }
+  },
+  "vm": { "agent": true, "ssh_keys": ["/root/.ssh/id_ed25519.pub"] }
 }
 ```
 
 ## Bootstrap
 
-Bootstrap scripts live in `/opt/labctl/bootstrap`. Each script does something different; `initialize_system` sets up basic tooling like ufw, qemu, and others, `initialize_docker` installs docker, `initialize_tailscale` installs tailscale
+Bootstrap scripts live in `/opt/phase/bootstrap/<os>/`. `initialize_system`
+sets up base tooling (ufw, qemu-guest-agent, ...), `initialize_docker`
+installs Docker, `initialize_tailscale` installs Tailscale. Scripts are
+uploaded and run inside the guest through the QEMU Guest Agent.
 
-## Common Commands
-```shell
-# Update from git and reinstall the binary only:
-labctl update
-# List templates
-labctl templates list
-# Test template resolution
-labctl templates resolve --size small --os ubuntu-26-lts
-# Find next VMID:
-labctl ids next --env prod
-# Plan a VM (see what it will do):
-labctl vm plan redis --env prod --size small --os ubuntu-26-lts
-# Create a VM:
-labctl vm create redis --env prod --size small --os ubuntu-26-lts
-# Create with bootstrap options (install docker or tailscale too):
-labctl vm create app --env lab --size medium --os ubuntu-26-lts --docker --tailscale
-# Connect over SSH:
-labctl vm connect prod-redis-1
-# Run a command over SSH:
-labctl vm connect prod-redis-1 --command 'hostname && whoami'
-# Open serial console:
-labctl vm connect prod-redis-1 --serial
-# Basic VM power controls:
-labctl vm start prod-redis-1
-labctl vm stop prod-redis-1
-labctl vm reboot prod-redis-1
-labctl vm reset prod-redis-1
-labctl vm shutdown prod-redis-1
-labctl vm pause prod-redis-1
-# Add a UFW rule using a network alias:
-labctl vm firewall add prod-redis-1 --from lan --port 6379
-# Manage tags:
-labctl vm tag list prod-redis-1
-labctl vm tag add prod-redis-1 db
-labctl vm tag remove prod-redis-1 db
-labctl vm tag set prod-redis-1 db cache
-# Rename while preserving env and instance:
-labctl vm rename --vm prod-redis-1 web_redis
-# Result: prod-web_redis-1
-# Destroy a VM (requires confirmation):
-labctl vm destroy prod-redis-1
-```
+## Notes
 
-# Friendly install reminder
-
-This essentially *assumes* you'll be using Ubuntu-based VMs with Cloudinit. I'll be making this more dynamic soon, supporting other distros like Debian or even Kali, but for now, ubuntu remains.
+- `phase vm create` with no saved plan opens an interactive gum wizard when a
+  terminal is available; non-interactively (CI, scripts) it requires the
+  fields as flags.
+- Destructive ops are guarded: `destroy` asks you to type the VM name;
+  `--force` only works for `tmp-*`/`lab-*` VMs.
+- Assumes Ubuntu-flavoured cloud-init templates by default; other OSes are
+  configured via `bootstrap.os_overrides`.
