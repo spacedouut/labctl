@@ -100,10 +100,9 @@ cmd_vm_firewall() {
 
 # Pretty-print a plan JSON (from stdin) for review.
 print_plan() {
-  local plan="$1" cores mem
+  local plan="$1" cores mem body
   read -r cores mem < <(resolve_size "$(jq -r '.size' <<<"$plan")")
-  cat <<EOF
-Will create:
+  body="$(cat <<EOF
   Name:     $(jq -r '.name' <<<"$plan")
   Size:     $(jq -r '.size' <<<"$plan") (${cores} vCPU, ${mem} MB)
   OS:       $(jq -r '.os' <<<"$plan")
@@ -118,6 +117,13 @@ Will create:
   Description: $(jq -r '.description // "none"' <<<"$plan")
   VMID:     $(jq -r 'if .vmid and .vmid != 0 then "\(.vmid)" else "allocated at create time" end' <<<"$plan")
 EOF
+)"
+  if have_tty; then
+    gum style --bold --foreground 4 "Will create:"
+    printf '%s\n' "$body" | gum style --border rounded --padding "0 2"
+  else
+    printf 'Will create:\n%s\n' "$body"
+  fi
 }
 
 # Offer a gum chooser when a value is missing; flags always win over prompts.
