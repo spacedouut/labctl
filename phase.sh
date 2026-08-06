@@ -12,8 +12,7 @@ source "$PHASE_DIR/cmds.sh"
 cmd_templates() {
   require_config
   local f id name template_flag
-  printf '%-8s %s\n' 'VMID' 'Name'
-  printf '%-8s %s\n' '--------' '--------'
+  local -a rows=()
   for f in "$QEMU_DIR"/*.conf; do
     [[ -e "$f" ]] || continue
     id="${f##*/}"; id="${id%.conf}"
@@ -21,8 +20,16 @@ cmd_templates() {
     [[ "$name" == tpl-* ]] || continue
     template_flag="$(template_field "$id" template)"
     [[ "$template_flag" == "1" ]] || continue
-    printf '%-8s %s\n' "$id" "$name"
-  done | sort -n
+    rows+=("$id | $name")
+  done
+  if have_tty; then
+    gum table --border rounded --separator " " <<<"VMID | Name
+$(printf '%s\n' "${rows[@]}" | sort -n)"
+  else
+    printf '%-8s %s\n' 'VMID' 'Name'
+    printf '%-8s %s\n' '--------' '--------'
+    printf '%s\n' "${rows[@]}" | sort -n | awk -F' \\| ' '{printf "%-8s %s\n", $1, $2}'
+  fi
 }
 
 cmd_update() {

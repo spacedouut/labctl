@@ -557,17 +557,49 @@ cmd_vm_nextid() {
 }
 
 cmd_vm_status() {
-  local name="$1" vmid
+  local name="$1" vmid state ip tags cores mem agent onboot
   vmid="$(vmid_by_name "$name")"
-  printf 'Name:   %s\n' "$name"
-  printf 'VMID:   %s\n' "$vmid"
-  printf 'State:  %s\n' "$(qm status "$vmid" | awk '{print $2}')"
-  printf 'IP:     %s\n' "$(best_guest_ip "$vmid" || printf 'unknown')"
-  printf 'Tags:   %s\n' "$(vm_tags "$vmid")"
-  printf 'Cores:  %s\n' "$(template_field "$vmid" cores)"
-  printf 'Memory: %s MB\n' "$(template_field "$vmid" memory)"
-  printf 'Agent:  %s\n' "$(template_field "$vmid" agent)"
-  printf 'Onboot: %s\n' "$(template_field "$vmid" onboot)"
+  state="$(qm status "$vmid" | awk '{print $2}')"
+  ip="$(best_guest_ip "$vmid" || printf 'unknown')"
+  tags="$(vm_tags "$vmid")"
+  cores="$(template_field "$vmid" cores)"
+  mem="$(template_field "$vmid" memory)"
+  agent="$(template_field "$vmid" agent)"
+  onboot="$(template_field "$vmid" onboot)"
+
+  # Plain output when piped/scripted; gum card only on a real TTY.
+  if ! have_tty; then
+    printf 'Name:   %s\n' "$name"
+    printf 'VMID:   %s\n' "$vmid"
+    printf 'State:  %s\n' "$state"
+    printf 'IP:     %s\n' "$ip"
+    printf 'Tags:   %s\n' "${tags:-}"
+    printf 'Cores:  %s\n' "$cores"
+    printf 'Memory: %s MB\n' "$mem"
+    printf 'Agent:  %s\n' "$agent"
+    printf 'Onboot: %s\n' "$onboot"
+    return
+  fi
+
+  local state_fg=1
+  case "$state" in
+    running) state_fg=2 ;;
+    stopped) state_fg=3 ;;
+  esac
+  local state_styled tags_styled
+  state_styled="$(gum style --foreground "$state_fg" --bold "$state")"
+  tags_styled="$(gum style --foreground 6 "${tags:-none}")"
+
+  gum style --border rounded --padding "0 4" --align center --width 52 \
+    "$(gum join --horizontal "$(gum style --bold "$name")" "$(gum style --faint "  ·  VMID $vmid")")"
+  gum table --border rounded --separator " " <<<"Property | Value
+State    | $state_styled
+IP       | $ip
+Tags     | $tags_styled
+Cores    | $cores
+Memory   | $mem MB
+Agent    | $agent
+Onboot   | $onboot"
 }
 
 # phase vm <name> service <unit> <action> [--user]
