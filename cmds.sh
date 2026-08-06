@@ -581,26 +581,22 @@ cmd_vm_status() {
     return
   fi
 
-  local state_fg=1 esc
+  local state_fg=1
   case "$state" in
     running) state_fg=2 ;;
     stopped) state_fg=3 ;;
   esac
-  esc=$'\033'
-  local state_ansi tags_ansi
-  state_ansi="${esc}[${state_fg}m${state}${esc}[0m"
-  if [[ -n "$tags" ]]; then
-    tags_ansi="${esc}[36m${tags}${esc}[0m"
-  else
-    tags_ansi="none"
-  fi
 
+  # State color goes in the title (gum applies it); gum style strips ANSI
+  # from stdin text, so the body card is uniform.
   gum style --border rounded --padding "0 4" --align center --width 52 \
-    "$(gum join --horizontal "$(gum style --bold "$name")" "$(gum style --faint "  ·  VMID $vmid")")"
+    "$(gum join --horizontal \
+        "$(gum style --bold "$name")" \
+        "$(gum style --faint "  ·  VMID $vmid")" \
+        "$(gum style --foreground "$state_fg" --bold "  [$state]")")"
   printf '%-10s %s\n' \
-    'State' "$state_ansi" \
     'IP' "$ip" \
-    'Tags' "$tags_ansi" \
+    'Tags' "${tags:-none}" \
     'Cores' "$cores" \
     'Memory' "$mem MB" \
     'Agent' "$agent" \
