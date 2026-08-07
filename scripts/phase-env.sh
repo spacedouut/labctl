@@ -40,7 +40,7 @@ if [[ -n "$UV_BIN" ]]; then
   PY_ARGS=()
   [[ -n "$PYVER" ]] && PY_ARGS+=(--python "$PYVER")
   "$UV_BIN" venv "$VENV_DIR" "${PY_ARGS[@]}"
-  INSTALL_ARGS=("$VENV_DIR/bin/python")
+  INSTALL_ARGS=(--python "$VENV_DIR/bin/python")
   if ((${#EXTRAS[@]})); then
     INSTALL_ARGS+=("-e" ".[$(IFS=,; echo "${EXTRAS[*]}")]")
   else
