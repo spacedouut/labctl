@@ -131,6 +131,7 @@ th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--bor
 th { color: var(--muted); font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; }
 tbody tr { transition: background .1s; }
 tbody tr:hover td { background: var(--surface-2); }
+td.loadrow { text-align: center; color: var(--muted); padding: 22px 10px; font-size: 13px; }
 td.click { cursor: pointer; }
 td.del { color: var(--err); cursor: pointer; width: 34px; text-align: center; }
 td.del:hover { background: var(--err-bg); }

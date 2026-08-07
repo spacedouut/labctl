@@ -44,6 +44,7 @@ import select
 import socket
 import subprocess
 import threading
+import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
@@ -78,6 +79,7 @@ def _start_task(fn, *args, **kw) -> str:
             _TASKS[tid] = {"status": "done", "result": result}
         except Exception as e:  # noqa: BLE001 — report to the UI
             _TASKS[tid] = {"status": "error", "error": str(e)}
+        _cache_drop()  # every task here mutates VMs — refresh caches
 
     threading.Thread(target=worker, daemon=True).start()
     return tid
@@ -97,6 +99,39 @@ def _meta(cfg, qm) -> dict:
         "plans": list_plans(),
         "next_vmid": next_vmid(qm),
     }
+
+
+# ---- read caches (qm subprocess calls cost ~0.5s each on PVE) ------------
+# meta and the VM list are read-only aggregates; serve them from a short TTL
+# cache so page loads don't stall on 6-10s of sequential qm calls. Every
+# mutating POST invalidates the affected entries.
+
+_CACHE: dict = {}
+_META_TTL = 30.0     # templates/sizes/plans change rarely
+_VMS_TTL = 8.0       # status/ip drift matters more, but 8s is plenty fresh
+
+
+def _cache_get(key: str, ttl: float, build):
+    now = time.monotonic()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < ttl:
+        return hit[1]
+    value = build()
+    _CACHE[key] = (now, value)
+    return value
+
+
+def _cache_drop(keys=("meta", "vms")):
+    for k in keys:
+        _CACHE.pop(k, None)
+
+
+def _cached_meta(cfg, qm) -> dict:
+    return _cache_get("meta", _META_TTL, lambda: _meta(cfg, qm))
+
+
+def _cached_vms(qm, cfg) -> list:
+    return _cache_get("vms", _VMS_TTL, lambda: all_vms(qm, cfg))
 
 
 _DISK_RE = __import__("re").compile(r"^(scsi|sata|virtio|ide)\d+$")
@@ -341,9 +376,9 @@ def make_handler(cfg, qm, token: str = ""):
             if not self._authed():
                 return self._json({"error": "unauthorized"}, 401)
             if path == "/api/meta":
-                return self._json(_meta(cfg, qm))
+                return self._json(_cached_meta(cfg, qm))
             if path == "/api/vms":
-                return self._json(all_vms(qm, cfg))
+                return self._json(_cached_vms(qm, cfg))
             if path.startswith("/api/vms/") and path.endswith("/snapshots"):
                 name = path[len("/api/vms/"):-len("/snapshots")]
                 try:
@@ -407,6 +442,7 @@ def make_handler(cfg, qm, token: str = ""):
                 try:
                     plan = state_to_plan(state, cfg)
                     vmid = realize_plan(cfg, qm, plan)
+                    _cache_drop()
                     return self._json({"ok": True, "vmid": vmid,
                                        "name": plan["name"]})
                 except Exception as e:  # noqa: BLE001
@@ -415,6 +451,7 @@ def make_handler(cfg, qm, token: str = ""):
                 state = self._read_state()
                 if state is None:
                     return
+                _cache_drop()
                 return self._task_json(provision_plan, cfg, qm,
                                        state_to_plan(state, cfg))
 
@@ -428,6 +465,7 @@ def make_handler(cfg, qm, token: str = ""):
                            "resume": "start"}
                 if action not in mapping:
                     return self._json({"error": f"bad action: {action}"}, 400)
+                _cache_drop()
                 return self._task_json(getattr(qm, mapping[action]), vmid)
             if path.startswith("/api/vms/") and path.endswith("/edit"):
                 name = path[len("/api/vms/"):-len("/edit")]
@@ -444,6 +482,7 @@ def make_handler(cfg, qm, token: str = ""):
                         else str(tags)
                 if not opts:
                     return self._json({"error": "nothing to change"}, 400)
+                _cache_drop()
                 return self._task_json(qm.set, vmid, **opts)
             if path.startswith("/api/vms/") and path.endswith("/disks/add"):
                 name = path[len("/api/vms/"):-len("/disks/add")]
@@ -454,6 +493,7 @@ def make_handler(cfg, qm, token: str = ""):
                 if not disk_id or not size or not storage:
                     return self._json(
                         {"error": "id, size and storage are required"}, 400)
+                _cache_drop()
                 return self._task_json(qm.set, vmid, **{disk_id: f"{storage}:{size}"})
             if path.startswith("/api/vms/") and path.endswith("/disks/resize"):
                 name = path[len("/api/vms/"):-len("/disks/resize")]
@@ -461,6 +501,7 @@ def make_handler(cfg, qm, token: str = ""):
                 body = self._read_body() or {}
                 if not body.get("id") or not body.get("size"):
                     return self._json({"error": "id and size are required"}, 400)
+                _cache_drop()
                 return self._task_json(qm.resize, vmid, body["id"], body["size"])
             if path.startswith("/api/vms/") and path.endswith("/firewall"):
                 name = path[len("/api/vms/"):-len("/firewall")]
@@ -474,12 +515,15 @@ def make_handler(cfg, qm, token: str = ""):
                 vmid = find_vmid(qm, name)
                 body = self._read_body() or {}
                 snap = body.get("name") or f"web-{uuid.uuid4().hex[:8]}"
+                _cache_drop()
                 return self._task_json(qm.snapshot, vmid, snap)
             if path.startswith("/api/vms/") and path.endswith("/backup"):
                 name = path[len("/api/vms/"):-len("/backup")]
+                _cache_drop()
                 return self._task_json(_vm_backup, cfg, qm, name)
             if path.startswith("/api/vms/") and path.endswith("/destroy"):
                 name = path[len("/api/vms/"):-len("/destroy")]
+                _cache_drop()
                 return self._task_json(_vm_destroy, cfg, qm, name)
             self._json({"error": "not found"}, 404)
 

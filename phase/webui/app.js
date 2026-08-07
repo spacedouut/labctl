@@ -55,6 +55,7 @@ function showTab(tab) {
 
 function init() {
   meta = null;
+  $("rail-plan").textContent = "loading…";
   api("/api/meta").then(m => {
     meta = m;
     $("hostline").textContent = m.host || "";
@@ -357,7 +358,16 @@ async function loadPlan(name) {
 // VMs list
 
 async function loadVms() {
-  const vms = await api("/api/vms");
+  $("vms-count").textContent = "";
+  const tb = $("vms-table").querySelector("tbody");
+  tb.innerHTML = `<tr><td colspan="7" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
+  let vms;
+  try {
+    vms = await api("/api/vms");
+  } catch (e) {
+    tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
+    return;
+  }
   const tb = $("vms-table").querySelector("tbody");
   tb.innerHTML = "";
   $("vms-count").textContent = `(${vms.length})`;
