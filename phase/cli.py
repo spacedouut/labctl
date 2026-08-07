@@ -23,7 +23,7 @@ import tempfile
 import time
 
 from . import __version__
-from .config import Config, ensure_state_dirs
+from .config import Config, ensure_state_dirs, state_dir
 from .disk import cmd_vm_disk
 from .inventory import cmd_inventory
 from .log import append_event
