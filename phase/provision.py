@@ -34,6 +34,9 @@ def _plan_for_create(cfg, qm, argv: list[str]):
 
 
 def cmd_vm_create(cfg, qm, argv):
+    if not argv and sys.stdin.isatty():
+        from .inline_wizard import run as inline_run
+        return inline_run(cfg, qm, action="create")
     plan, opts = _plan_for_create(cfg, qm, argv)
     vmid = realize_plan(cfg, qm, plan, dry_run=opts["dry-run"])
     if opts["vmidout"]:
@@ -47,11 +50,22 @@ def cmd_vm_create(cfg, qm, argv):
 
 def cmd_vm_provision(cfg, qm, argv):
     """create + start + wait for agent/IP + bootstrap (the heavy workflow)."""
+    if not argv and sys.stdin.isatty():
+        from .inline_wizard import run as inline_run
+        return inline_run(cfg, qm, action="provision")
     plan, opts = _plan_for_create(cfg, qm, argv)
-    name = plan["name"]
-    vmid = realize_plan(cfg, qm, plan, dry_run=opts["dry-run"])
     if opts["dry-run"]:
+        realize_plan(cfg, qm, plan, dry_run=True)
         return 0
+    provision_plan(cfg, qm, plan)
+    return 0
+
+
+def provision_plan(cfg, qm, plan: dict) -> int:
+    """Provision from a plan dict (shared by the CLI and the inline wizard).
+    Returns the VMID; raises PhaseError on failure."""
+    name = plan["name"]
+    vmid = realize_plan(cfg, qm, plan)
 
     qm.start(vmid)
     log(f"Waiting for guest agent on {name}...")
@@ -77,7 +91,7 @@ def cmd_vm_provision(cfg, qm, argv):
         append_event(event="vm.provision.failed", vmid=vmid, name=name, detail=str(e))
         send(cfg, f"✗ provision failed: {name}", str(e))
         raise
-    return 0
+    return vmid
 
 
 def bootstrap_script(cfg, os_name: str, step: str) -> str | None:

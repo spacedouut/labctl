@@ -212,6 +212,84 @@ def test_template_pipeline():
     shutil.rmtree(tmp)
 
 
+def test_inline_wizard():
+    print("inline wizard (units + keys)")
+    import json as _json
+    import pty as _pty
+    import threading
+    import time
+    from phase import inline_wizard as iw
+    from phase.wizard import validate_step
+
+    cfg = _json.load(open(FIXTURE_CONFIG))
+    st = {
+        "name": "pg2", "size": "small", "cores": "", "memory": "",
+        "os": "ubuntu-26", "os_disk_size": "30G", "os_disk_storage": "",
+        "data_disks": [{"id": "scsi1", "size": "50G", "storage": "nas"}],
+        "bridge": "lan", "vlan": "", "ipmode": "static",
+        "ip": "10.10.1.50/24", "gw": "10.10.1.1",
+        "onboot": True, "protect": False, "tags": ["db"], "ssh_keys": [],
+        "gpu": "", "bootstrap": {"system": True, "docker": False,
+                                   "tailscale": False},
+    }
+    plan = iw.state_to_plan(st, cfg)
+    check("state_to_plan name/size/os",
+          plan["name"] == "pg2" and plan["size"] == "small"
+          and plan["os"] == "ubuntu-26")
+    check("state_to_plan cores from size", plan["cores"] == "2"
+          and plan["memory"] == "2048")
+    check("state_to_plan disks", len(plan["disks"]) == 2
+          and plan["disks"][0]["role"] == "os" and plan["disks"][1]["role"] == "data")
+    check("state_to_plan net/ip", plan["net"]["bridge"] == "lan"
+          and plan["ipconfig"] == "10.10.1.50/24" and plan["gw"] == "10.10.1.1")
+    check("state_to_plan bootstrap/tags", plan["bootstrap"]["system"]
+          and plan["tags"] == ["db"] and plan["ssh_keys"] == [])
+    st2 = dict(st, cores="4", memory="4096")
+    p2 = iw.state_to_plan(st2, cfg)
+    check("state_to_plan overrides", p2["cores"] == "4" and p2["memory"] == "4096")
+
+    check("inline state passes wizard validation",
+          validate_step(iw._wizard_state(st), 1, cfg) == [])
+    bad = iw._wizard_state(dict(st, name="Bad Name"))
+    check("inline state caught by wizard validation",
+          any("name" in e for e in validate_step(bad, 1, cfg)))
+    check("index_of choice", iw._index_of(["a", "b", "c"], "c", "size") == 2)
+    check("index_of default", iw._index_of(["a", "b"], "", "size") == 0)
+    check("index_of ssh none", iw._index_of(["(none)", "k"], [], "ssh_keys") == 0)
+
+    # key parsing over a pty (canonical mode would buffer; use cbreak)
+    master, slave = _pty.openpty()
+    _tty = __import__("tty")
+    _tty.setcbreak(slave)
+    seen = {}
+
+    def read_key(tag, timeout=3.0):
+        seen[tag] = iw._read_key(slave, timeout=timeout)
+
+    for tag, b in (("up", b"\x1b[A"), ("down", b"\x1b[B"),
+                   ("enter", b"\r"), ("esc", b"\x1b"),
+                   ("char", b"x")):
+        t = threading.Thread(target=read_key, args=(tag,))
+        t.start()
+        time.sleep(0.15)
+        os.write(master, b)
+        t.join(timeout=3)
+        check(f"key parse: {tag}", seen.get(tag) == tag.replace("char", "x") or
+              seen.get(tag) == ("esc" if tag == "esc" else tag))
+    import termios as _termios
+    _termios.tcsetattr(slave, _termios.TCSADRAIN, _tty.tcgetattr(slave))
+    os.close(master)
+    os.close(slave)
+
+    # CLI: bare create without a TTY still fails cleanly (no hang)
+    tmp = fresh_tmp()
+    p = subprocess.run([sys.executable, BIN, "vm", "create"], capture_output=True,
+                       text=True, env=_env(tmp), cwd=ROOT)
+    check("bare create non-tty errors", p.returncode != 0
+          and "missing required field" in p.stderr)
+    shutil.rmtree(tmp)
+
+
 def test_destroy_yes():
     print("destroy --yes")
     tmp = fresh_tmp()
@@ -539,7 +617,8 @@ def main():
     global failed
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
              test_dry_run, test_destroy_yes, test_engine_daemon, test_tui,
-             test_tui_create_start, test_wizard_units, test_wizard_tui]
+             test_tui_create_start, test_wizard_units, test_wizard_tui,
+             test_inline_wizard]
     for t in tests:
         try:
             t()
