@@ -5,7 +5,7 @@ Grammar (v3-compatible hybrid, extended):
   noun-first:  phase vm <name> <action> ...
   legacy:      phase vm <action> <name> ...
   bare name:   phase vm <name>            -> ssh
-  bare:        phase                       -> TUI menu (with tui extra)
+  tui (opt-in): phase tui [create]        -> fullscreen menu / create wizard
 
 New in v4: template pipeline, engine (scan/doctor/daemon/systemd),
 disk id+role model, ssh-key pool, inventory, plan library, event log.
@@ -34,7 +34,7 @@ from .provision import (cmd_vm_bootstrap, cmd_vm_create, cmd_vm_nextid,
 from .qm import Qm, vzdump_backup
 from .report import cmd_report
 from .transport import make_transport
-from .util import (PhaseError, confirm, die, have_tty, log,
+from .util import (PhaseError, confirm, die, log,
                    normalize_tags, validate_name, validate_tag, warn)
 from .vm import (all_vms, best_guest_ip, find_vmid, has_known_ssh_key,
                  list_templates, set_tags, vm_tags, vm_ssh_user_ip)
@@ -53,7 +53,8 @@ USAGE = """\
 phase - compute-engine style VM management for Proxmox VE.
 
 Usage:
-  phase                                    # TUI menu (with tui extra)
+  phase                                    # print this help
+  phase tui [create]                       # fullscreen menu (opt-in)
   phase vm plan|create|provision|nextid ...  # verb-first (creation)
   phase vm <name> <action> ...               # noun-first (per-VM ops)
   phase vm <name>                            # bare name = ssh
@@ -116,8 +117,6 @@ def _main(argv: list[str]) -> int:
     rest = argv[i:]
 
     if not rest:
-        if have_tty():
-            return _tui_or_usage(cfg_path, host, json_out)
         log(USAGE)
         return 0
     cmd = rest[0]
@@ -134,7 +133,9 @@ def _main(argv: list[str]) -> int:
         log(f"phase {__version__}")
         return 0
     if cmd == "tui":
-        return _tui_or_usage(cfg_path, host, json_out)
+        # fullscreen TUI is opt-in: `phase tui` (or `phase tui create` for
+        # the create wizard directly). Bare `phase` never takes over.
+        return _tui_or_usage(cfg_path, host, rest)
     if cmd == "update":
         return cmd_update()
 
@@ -166,10 +167,11 @@ def _main(argv: list[str]) -> int:
     return rc
 
 
-def _tui_or_usage(cfg_path, host, json_out) -> int:
+def _tui_or_usage(cfg_path, host, rest) -> int:
     try:
         from . import tui
-        return tui.run(cfg_path, host)
+        start = rest[0] if rest and rest[0] in ("create", "menu") else "menu"
+        return tui.run(cfg_path, host, start=start)
     except PhaseError as e:  # MissingExtra
         print(f"phase: {e}", file=sys.stderr)
         return 1
@@ -181,8 +183,6 @@ def _tui_or_usage(cfg_path, host, json_out) -> int:
 
 def cmd_vm(cfg, qm, argv, json_out) -> int:
     if not argv:
-        if have_tty():
-            return _tui_or_usage(None, None, json_out)
         die("usage: phase vm <name|action> ...")
     first = argv[0]
     rest = argv[1:]

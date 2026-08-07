@@ -333,6 +333,33 @@ def test_tui():
     shutil.rmtree(tmp)
 
 
+def test_tui_create_start():
+    print("tui opt-in: phase tui create")
+    try:
+        import textual  # noqa
+    except ImportError:
+        print("  - textual not installed, skipping")
+        return
+    import asyncio
+    from phase.tui import PhaseApp
+    from phase.wizard import CreateWizardScreen
+
+    tmp = fresh_tmp()
+    env = _env(tmp)
+    os.environ.update({k: v for k, v in env.items()})
+    os.environ["PHASE_BIN"] = os.path.join(ROOT, "bin", "phase")
+
+    async def drive():
+        app = PhaseApp(start="create")
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            check("tui create opens wizard directly",
+                  isinstance(app.screen, CreateWizardScreen))
+
+    asyncio.run(drive())
+    shutil.rmtree(tmp)
+
+
 def test_wizard_units():
     print("wizard pure units")
     from phase.wizard import plan_argv, validate_step, summary_line
@@ -512,7 +539,7 @@ def main():
     global failed
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
              test_dry_run, test_destroy_yes, test_engine_daemon, test_tui,
-             test_wizard_units, test_wizard_tui]
+             test_tui_create_start, test_wizard_units, test_wizard_tui]
     for t in tests:
         try:
             t()

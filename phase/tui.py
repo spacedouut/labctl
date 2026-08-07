@@ -18,13 +18,13 @@ import subprocess
 from .extras import MissingExtra
 
 
-def run(cfg_path=None, host=None) -> int:
+def run(cfg_path=None, host=None, start: str = "menu") -> int:
     try:
         import textual
         from textual.app import App
     except ImportError:
         raise MissingExtra("tui")
-    app = PhaseApp(cfg_path=cfg_path, host=host)
+    app = PhaseApp(cfg_path=cfg_path, host=host, start=start)
     app.run()
     return 0
 
@@ -97,17 +97,21 @@ class PhaseApp(App):
     .badge { padding: 0 1; }
     """
 
-    def __init__(self, cfg_path=None, host=None):
+    def __init__(self, cfg_path=None, host=None, start: str = "menu"):
         super().__init__()
         self.cfg_path = cfg_path
         self.host = host
+        self.start = start
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Footer()
 
     def on_mount(self) -> None:
-        self.push_screen(MenuScreen(self.cfg_path, self.host))
+        if self.start == "create":
+            self.push_screen(CreateWizardScreen(self.cfg_path, self.host))
+        else:
+            self.push_screen(MenuScreen(self.cfg_path, self.host))
 
 
 # ---------------------------------------------------------------------------
@@ -278,7 +282,7 @@ class MenuScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="menu-screen"):
             with Vertical(id="menu-box"):
-                yield Static("🦞  phase", id="menu-title")
+                yield Static("phase", id="menu-title")
                 yield Static("Proxmox VM orchestration · "
                              + (self.host or "homelab"), id="menu-sub")
                 yield ListView(
