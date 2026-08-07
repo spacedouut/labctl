@@ -1,6 +1,6 @@
 "use strict";
 const $ = id => document.getElementById(id);
-const SECTIONS = ["machine", "disks", "network", "others", "finalize"];
+const SECTIONS = ["machine", "disks", "network", "others"];
 const TOKEN_KEY = "phase_token";
 let token = localStorage.getItem(TOKEN_KEY) || "";
 let meta = null;
@@ -66,7 +66,9 @@ function init() {
     if (m.sizes && m.sizes.small) state.size = "small";
     else if (m.sizes) state.size = Object.keys(m.sizes)[0];
     if (m.oses && m.oses.length) state.os = m.oses[0];
+    buildStepper();
     renderAll();
+    debouncedValidate();
   });
 }
 function fillSelect(sel, pairs) {
@@ -91,7 +93,83 @@ function buildSizeChips() {
 }
 function showSection(name) {
   SECTIONS.forEach(s => $("pane-" + s).classList.toggle("hide", s !== name));
-  if (name === "finalize") validate();
+  document.querySelectorAll(".stepper [data-sec]").forEach(b =>
+    b.classList.toggle("active", b.dataset.sec === name));
+}
+
+// --- stepper (GCP-style section list with summary subtext) --------------
+function buildStepper() {
+  const nav = $("stepper");
+  nav.innerHTML = "";
+  SECTIONS.forEach(s => {
+    const b = document.createElement("button");
+    b.dataset.sec = s;
+    b.innerHTML = `<span class="s-title"><span class="s-dot"></span>${s[0].toUpperCase() + s.slice(1)}</span>`
+      + `<div class="s-sub"></div>`;
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".stepper [data-sec]").forEach(x => x.classList.remove("active"));
+      b.classList.add("active");
+      showSection(s);
+    });
+    nav.appendChild(b);
+  });
+}
+// --- error field highlighting -------------------------------------------
+function highlightErrors(all) {
+  // map backend error strings to form controls
+  const map = [
+    ["name is required", "f-name"], ["name must match", "f-name"], ["name too long", "f-name"],
+    ["pick a size", "size-chips"],
+    ["cores must be", "f-cores"], ["memory must be", "f-memory"],
+    ["boot disk: bad size", "f-osdisk-size"],
+    ["vlan must be", "f-vlan"],
+    ["static IP required", "f-ip"], ["is not a static IP", "f-ip"],
+    ["gateway doesn't look like an IP", "f-gw"],
+  ];
+  const bad = new Set();
+  all.forEach(e => map.forEach(([pat, id]) => { if (e.includes(pat)) bad.add(id); }));
+  document.querySelectorAll(".field.bad, .chips.bad").forEach(el => el.classList.remove("bad"));
+  bad.forEach(id => {
+    const el = $(id);
+    if (!el) return;
+    (el.classList.contains("chips") ? el : el.closest(".field") || el).classList.add("bad");
+  });
+}
+function updateStepper() {
+  SECTIONS.forEach((s, i) => {
+    const b = document.querySelector(`.stepper [data-sec="${s}"]`);
+    if (!b) return;
+    const errs = (errors[i + 1] || []).length;
+    b.querySelector(".s-dot").className = "s-dot" + (errs ? " bad" : " ok");
+    let sub = "—";
+    if (s === "machine") sub = `${state.name || "(unnamed)"} · ${state.size || "?"}`;
+    else if (s === "disks") sub = `${state.disks.length} disk(s)`;
+    else if (s === "network") sub = `${state.bridge || "default"} · ${state.ipmode}`;
+    else if (s === "others") sub = state.tags.join(",")
+      || (state.bootstrap.system || state.bootstrap.docker || state.bootstrap.tailscale
+          ? "bootstrap" : "—");
+    b.querySelector(".s-sub").textContent = sub;
+  });
+}
+
+// --- equivalent command (GCP "Equivalent code" analog) -------------------
+function buildCommand(st) {
+  const a = ["phase", "vm", "create", "--name", st.name, "--size", st.size];
+  if (st.cores) a.push("--cores", st.cores);
+  if (st.memory) a.push("--memory", st.memory);
+  a.push("--os", st.os);
+  const boot = st.disks.find(d => d.boot) || st.disks[0];
+  if (boot.size) a.push("--disk", `scsi0:os:${st.os}:${boot.size}`
+    + (boot.storage ? `:${boot.storage}` : ""));
+  st.disks.filter(d => d !== boot).forEach(d =>
+    a.push("--disk", `${d.id}:data:${d.size}` + (d.storage ? `:${d.storage}` : "")));
+  if (st.bridge) a.push("--bridge", st.bridge);
+  if (st.vlan) a.push("--vlan", st.vlan);
+  if (st.ipmode === "static" && st.ip) { a.push("--ip", st.ip); if (st.gw) a.push("--gw", st.gw); }
+  if (st.tags.length) st.tags.forEach(t => a.push("--tag", t));
+  ["system", "docker", "tailscale"].forEach(k => { if (st.bootstrap[k]) a.push("--" + k); });
+  if (st.gpu) a.push("--gpu", st.gpu);
+  return a.join(" ");
 }
 
 // --- unified disks ------------------------------------------------------
@@ -209,16 +287,19 @@ async function validate() {
     body: JSON.stringify({ state: toBackend(state) }),
   });
   errors = res.errors || {};
-  const names = ["machine", "disks", "network", "others"];
-  names.forEach((n, i) => {
-    const errs = (errors[i + 1] || []).length;
-    const dot = document.querySelector(`[data-sec="${n}"]`);
-    if (dot) dot.style.color = errs ? "var(--err)" : "var(--ok)";
-  });
-  $("errors").textContent = errors[5] && errors[5].length ? "✗ " + errors[5].join("\n") : "";
+  const all = [];
+  for (let i = 1; i <= 5; i++) if (errors[i]) all.push(...errors[i]);
+  $("errors").textContent = all.length ? "✗ " + all.join("\n") : "";
+  highlightErrors(all);
   const ok = !!res.plan;
   ["act-create", "act-provision", "act-save"].forEach(id => $(id).disabled = !ok);
-  if (res.plan) $("review").textContent = res.plan_text;
+  if (res.plan) {
+    $("rail-plan").textContent = res.plan_text;
+    $("rail-cmd").textContent = buildCommand(state);
+  } else {
+    $("rail-plan").textContent = "complete the highlighted fields";
+  }
+  updateStepper();
 }
 
 // --- actions -------------------------------------------------------------
@@ -580,11 +661,11 @@ $("term-close").addEventListener("click", closeTerminal);
   .forEach(id => $(id) && $(id).addEventListener("change", debouncedValidate));
 
 SECTIONS.forEach(s => {
-  const btn = document.querySelector(`[data-sec="${s}"]`);
-  if (!btn) return;
-  btn.addEventListener("click", () => {
-    document.querySelectorAll("[data-sec]").forEach(b => b.classList.remove("active"));
-    btn.classList.add("active");
+  const b = document.querySelector(`.stepper [data-sec="${s}"]`);
+  if (!b) return;
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".stepper [data-sec]").forEach(x => x.classList.remove("active"));
+    b.classList.add("active");
     showSection(s);
   });
 });

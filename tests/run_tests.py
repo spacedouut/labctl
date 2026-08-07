@@ -334,7 +334,8 @@ def test_web_api():
     meta = get("/api/meta")
     check("web meta sizes+oses", "small" in meta["sizes"] and "ubuntu-26" in meta["oses"])
     page = _url.urlopen(base + "/").read().decode()
-    check("web page served", "Machine configuration" in page and "Finalize" in page)
+    check("web page served", "Machine configuration" in page
+          and "Create + provision" in page and "Equivalent command" in page)
     js = _url.urlopen(base + "/app.js").read().decode()
     check("web app.js served", "openTerminal" in js)
     xterm = _url.urlopen(base + "/static/xterm.js").read()

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>phase · VM console</title>
 <link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/static/fonts.css">
 <link rel="stylesheet" href="/static/xterm.css">
 </head>
 <body>
@@ -25,13 +26,9 @@
 
   <!-- ================= CREATE ================= -->
   <main id="view-create">
-    <nav class="sec-tabs">
-      <button data-sec="machine" class="active">Machine</button>
-      <button data-sec="disks">Disks</button>
-      <button data-sec="network">Network</button>
-      <button data-sec="others">Others</button>
-      <button data-sec="finalize">Finalize</button>
-    </nav>
+    <div class="create-wrap">
+      <nav class="stepper" id="stepper"></nav>
+      <div class="panes">
     <div id="pane-machine" class="pane">
       <h2>Machine configuration</h2>
       <div class="sub">Basics, sizing, and operating system.</div>
@@ -108,7 +105,7 @@
       <div class="sub">Tags, lifecycle flags, GPU, bootstrap.</div>
       <div class="card">
         <div class="row">
-          <div class="field" style="flex:1"><label>Tags (comma separated)</label>
+          <div class="field" style="flex:1"><label>Tags <span class="req">(comma separated)</span></label>
             <input type="text" id="f-tags" placeholder="db,prod" spellcheck="false"></div>
         </div>
         <label class="toggle"><input type="checkbox" id="f-onboot" checked> Start on boot</label>
@@ -116,7 +113,7 @@
       </div>
       <div class="card">
         <h3>GPU</h3>
-        <div class="field"><label>mdev (optional)</label>
+        <div class="field"><label>mdev <span class="hint">(optional)</span></label>
           <input type="text" id="f-gpu" placeholder="e.g. nvidia-223" spellcheck="false"></div>
       </div>
       <div class="card">
@@ -130,20 +127,23 @@
         <div class="field"><label>From the config pool</label><select id="f-sshkey"></select></div>
       </div>
     </div>
-
-    <div id="pane-finalize" class="pane hide">
-      <h2>Finalize</h2>
-      <div class="sub">Review the plan, then create.</div>
-      <div class="card">
-        <h3>Will create</h3>
-        <div id="review"></div>
       </div>
-      <div id="errors"></div>
-      <div class="actions">
-        <button class="btn" id="act-create">⚙  Create</button>
-        <button class="btn" id="act-provision">🚀 Create + provision</button>
-        <button class="btn ghost" id="act-save">💾 Save plan only</button>
-      </div>
+      <aside class="rail">
+        <div class="rail-card">
+          <div class="rail-title"><span class="live"></span>Plan</div>
+          <div id="rail-plan"></div>
+          <details>
+            <summary>Equivalent command</summary>
+            <pre id="rail-cmd"></pre>
+          </details>
+          <div id="errors"></div>
+          <div class="rail-actions">
+            <button class="btn" id="act-create">⚙  Create</button>
+            <button class="btn" id="act-provision">🚀 Create + provision</button>
+            <button class="btn ghost" id="act-save">💾 Save plan only</button>
+          </div>
+        </div>
+      </aside>
     </div>
   </main>
 

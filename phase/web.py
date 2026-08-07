@@ -333,6 +333,8 @@ def make_handler(cfg, qm, token: str = ""):
                 return self._file("app.css", "text/css; charset=utf-8")
             if path.startswith("/static/"):
                 rel = "static/" + path[len("/static/"):]
+                if rel.endswith(".woff2"):
+                    return self._file(rel, "font/woff2")
                 return self._file(rel,
                                   "text/javascript; charset=utf-8"
                                   if rel.endswith(".js") else "text/css")
