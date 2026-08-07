@@ -32,6 +32,15 @@ class Extra:
     features: tuple = ()
     kind: str = "pip"
 
+    def __post_init__(self):
+        # tolerate features=("single string") — missing trailing comma
+        if isinstance(self.features, str):
+            self.features = (self.features,)
+        if isinstance(self.modules, str):
+            self.modules = (self.modules,)
+        if isinstance(self.binaries, str):
+            self.binaries = (self.binaries,)
+
     def installed(self) -> bool:
         mods_ok = all(importlib.util.find_spec(m) is not None for m in self.modules)
         bins_ok = all(shutil.which(b) is not None for b in self.binaries)
