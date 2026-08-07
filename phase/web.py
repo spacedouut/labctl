@@ -657,6 +657,18 @@ def run(cfg, qm, listen: str = "127.0.0.1", port: int = 8080,
         log("    ssh -L 8080:localhost:8080 root@<this-host>  →  http://localhost:8080")
         log("  or expose on the LAN with:  phase web --listen 0.0.0.0")
     log("  ctrl-c to stop")
+
+    def _warm():
+        # qm calls are slow (~0.5-0.7s each); pre-build the caches so the
+        # first visitor doesn't sit on a 7-10s blank page after a restart.
+        try:
+            _cached_meta(cfg, qm)
+            _cached_vms(qm, cfg)
+        except Exception:  # noqa: BLE001 — warm-up must never kill the server
+            pass
+
+    threading.Thread(target=_warm, daemon=True).start()
+
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
