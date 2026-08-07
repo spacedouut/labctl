@@ -345,6 +345,24 @@ def test_web_api():
     check("web create vm", r4["ok"] and r4["vmid"])
     full = get("/api/plans/webvm1")
     check("web load plan", full["name"] == "webvm1" and len(full["disks"]) == 2)
+
+    # token gate
+    port2 = 8932
+    t2 = _threading.Thread(target=run, args=(cfg, qm),
+                           kwargs={"listen": "127.0.0.1", "port": port2,
+                                   "token": "sekrit"}, daemon=True)
+    t2.start()
+    _time.sleep(0.8)
+    base2 = f"http://127.0.0.1:{port2}"
+    import urllib.error as _urlerr
+    try:
+        _url.urlopen(base2 + "/api/meta").read()
+        check("web token rejects anonymous", False)
+    except _urlerr.HTTPError as e:
+        check("web token rejects anonymous", e.code == 401)
+    req = _url.Request(base2 + "/api/meta",
+                       headers={"X-Phase-Token": "sekrit"})
+    check("web token accepts valid", _json.loads(_url.urlopen(req).read())["oses"])
     shutil.rmtree(tmp)
 
 

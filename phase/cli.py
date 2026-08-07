@@ -833,6 +833,7 @@ def cmd_web(cfg, qm, argv) -> int:
     opts, pos = parse_flags(argv, {
         "listen": {"default": "127.0.0.1"},
         "port": {"default": "8080"},
+        "token": {"default": ""},
         "open": {"bool": True, "default": False},
     })
     from . import web
@@ -843,7 +844,7 @@ def cmd_web(cfg, qm, argv) -> int:
         import webbrowser
         threading.Timer(0.6, lambda: webbrowser.open(
             f"http://{opts['listen']}:{port}")).start()
-    return web.run(cfg, qm, listen=opts["listen"], port=port)
+    return web.run(cfg, qm, listen=opts["listen"], port=port, token=opts["token"])
 
 
 def cmd_sshkey(cfg, argv) -> int:

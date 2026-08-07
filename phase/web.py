@@ -82,11 +82,17 @@ def _start_provision(cfg, qm, state: dict) -> str:
     return tid
 
 
-def make_handler(cfg, qm):
+def make_handler(cfg, qm, token: str = ""):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         # ---- helpers ----------------------------------------------------
+
+        def _authed(self):
+            """Token gate: when a token is configured, /api/* needs it."""
+            if not token:
+                return True
+            return self.headers.get("X-Phase-Token") == token
 
         def _json(self, obj, code=200):
             body = json.dumps(obj).encode()
@@ -132,6 +138,8 @@ def make_handler(cfg, qm):
             path = unquote(self.path.split("?")[0])
             if path in ("/", "/index.html"):
                 return self._html(WEBUI)
+            if not self._authed():
+                return self._json({"error": "unauthorized — set X-Phase-Token"}, 401)
             if path == "/api/meta":
                 return self._json(_meta(cfg, qm))
             if path.startswith("/api/plans/"):
@@ -149,6 +157,8 @@ def make_handler(cfg, qm):
 
         def do_POST(self):
             path = unquote(self.path.split("?")[0])
+            if not self._authed():
+                return self._json({"error": "unauthorized — set X-Phase-Token"}, 401)
             if path == "/api/plan":
                 state = self._read_state()
                 if state is None:
@@ -186,8 +196,11 @@ def make_handler(cfg, qm):
     return Handler
 
 
-def run(cfg, qm, listen: str = "127.0.0.1", port: int = 8080) -> int:
-    handler = make_handler(cfg, qm)
+def run(cfg, qm, listen: str = "127.0.0.1", port: int = 8080,
+        token: str = "") -> int:
+    if not token:
+        token = _dget(cfg, "web.token") or ""
+    handler = make_handler(cfg, qm, token)
     try:
         httpd = ThreadingHTTPServer((listen, port), handler)
     except OSError as e:
@@ -195,6 +208,8 @@ def run(cfg, qm, listen: str = "127.0.0.1", port: int = 8080) -> int:
     url = f"http://{listen}:{port}"
     log("phase web — GCE-style create VM")
     log(f"  open:  {url}")
+    if token:
+        log("  auth:  X-Phase-Token required (set via --token or config web.token)")
     if listen == "127.0.0.1":
         log("  from another machine, tunnel:")
         log("    ssh -L 8080:localhost:8080 root@<this-host>  →  http://localhost:8080")

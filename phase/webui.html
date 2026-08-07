@@ -210,6 +210,8 @@
 "use strict";
 const SECTIONS = ["machine", "disks", "network", "others", "finalize"];
 const $ = id => document.getElementById(id);
+const TOKEN_KEY = "phase.web.token";
+let token = localStorage.getItem(TOKEN_KEY) || "";
 
 let meta = null;
 let state = {
@@ -224,7 +226,15 @@ let stepDots = {};      // step -> "ok" | "bad" | ""
 let errors = {};
 
 async function api(path, opts) {
+  opts = opts || {};
+  opts.headers = Object.assign({}, opts.headers);
+  if (token) opts.headers["X-Phase-Token"] = token;
   const r = await fetch(path, opts);
+  if (r.status === 401) {
+    token = prompt("Access token for this phase instance:") || "";
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    return api(path, opts);
+  }
   return r.json();
 }
 
