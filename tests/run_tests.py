@@ -290,6 +290,64 @@ def test_inline_wizard():
     shutil.rmtree(tmp)
 
 
+def test_web_api():
+    print("web api (stdlib server)")
+    import json as _json
+    import threading as _threading
+    import time as _time
+    import urllib.request as _url
+    from phase.config import Config
+    from phase.qm import Qm
+    from phase.transport import make_transport
+    from phase.web import run
+
+    tmp = fresh_tmp()
+    os.environ.update({k: v for k, v in _env(tmp).items()})
+    cfg = Config.load()
+    qm = Qm(make_transport(None))
+    port = 8931
+    t = _threading.Thread(target=run, args=(cfg, qm),
+                          kwargs={"listen": "127.0.0.1", "port": port},
+                          daemon=True)
+    t.start()
+    _time.sleep(0.8)
+    base = f"http://127.0.0.1:{port}"
+
+    def get(p):
+        return _json.loads(_url.urlopen(base + p).read())
+
+    def post(p, body):
+        req = _url.Request(base + p, data=_json.dumps(body).encode(),
+                           headers={"Content-Type": "application/json"})
+        return _json.loads(_url.urlopen(req).read())
+
+    meta = get("/api/meta")
+    check("web meta sizes+oses", "small" in meta["sizes"] and "ubuntu-26" in meta["oses"])
+    page = _url.urlopen(base + "/").read().decode()
+    check("web page served", "Machine configuration" in page and "Finalize" in page)
+
+    state = {
+        "name": "webvm1", "size": "small", "cores": "", "memory": "",
+        "os": "ubuntu-26", "os_disk_size": "30G", "os_disk_storage": "",
+        "data_disks": [{"id": "scsi1", "size": "50G", "storage": "nas"}],
+        "bridge": "lan", "vlan": "", "ipmode": "dhcp", "ip": "", "gw": "",
+        "tags": ["web"], "onboot": True, "protect": False, "gpu": "",
+        "bootstrap": {"system": True, "docker": False, "tailscale": False},
+        "ssh_keys": [], "description": "",
+    }
+    r = post("/api/plan", {"state": state})
+    check("web plan ok", r["ok"] and "Size:" in r["plan_text"])
+    r2 = post("/api/plan", {"state": dict(state, name="Bad Name!")})
+    check("web bad name rejected", not r2["ok"] and r2["errors"]["1"])
+    r3 = post("/api/save", {"state": state})
+    check("web save plan", r3["ok"] and "webvm1.json" in r3["path"])
+    r4 = post("/api/create", {"state": state})
+    check("web create vm", r4["ok"] and r4["vmid"])
+    full = get("/api/plans/webvm1")
+    check("web load plan", full["name"] == "webvm1" and len(full["disks"]) == 2)
+    shutil.rmtree(tmp)
+
+
 def test_destroy_yes():
     print("destroy --yes")
     tmp = fresh_tmp()
@@ -618,7 +676,7 @@ def main():
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
              test_dry_run, test_destroy_yes, test_engine_daemon, test_tui,
              test_tui_create_start, test_wizard_units, test_wizard_tui,
-             test_inline_wizard]
+             test_inline_wizard, test_web_api]
     for t in tests:
         try:
             t()

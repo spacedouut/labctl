@@ -236,7 +236,7 @@ def _fmt(state, key, label, kind, optional):
 
 def _render(state, step_idx, field_idx, mode, cursor, options, opt_idx,
             errs, summary, action_idx, actions, running, disks_mode,
-            text_key=None, disk_form=None):
+            text_key=None, disk_form=None, disk_fi=0):
     """Build the two-pane panel. mode: steps|fields|text|choice|toggles|disks|finalize"""
     left = Text()
     for i, (name, _fields) in enumerate(STEPS):
@@ -420,11 +420,13 @@ def _loop(cfg, qm, state, fd, console, action) -> int:
     result = None
 
     reader = KeyReader(fd)
-    with Live(console=console, refresh_per_second=6, screen=False) as live:
+    with Live(console=console, refresh_per_second=6, screen=False,
+              transient=True) as live:
         while result is None:
             live.update(_render(state, step_idx, field_idx, mode, cursor,
                                 options, opt_idx, errs, None, action_idx,
-                                actions, running, disks_mode, text_key, disk_form))
+                                actions, running, disks_mode, text_key, disk_form,
+                                disk_fi))
             key = reader.read()
             if not key:
                 continue

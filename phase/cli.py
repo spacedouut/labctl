@@ -148,6 +148,7 @@ def _main(argv: list[str]) -> int:
         "plan": lambda: cmd_plan_group(cfg, qm, argv, json_out),
         "engine": lambda: cmd_engine(cfg, qm, argv, json_out),
         "ssh-key": lambda: cmd_sshkey(cfg, argv),
+        "web": lambda: cmd_web(cfg, qm, argv),
         "inventory": lambda: cmd_inventory(cfg, qm, argv),
         "report": lambda: cmd_report(cfg, qm, argv),
         "extras": lambda: cmd_extras(cfg),
@@ -826,6 +827,23 @@ def cmd_engine(cfg, qm, argv, json_out) -> int:
 
 # ---------------------------------------------------------------------------
 # ssh-key pool
+
+
+def cmd_web(cfg, qm, argv) -> int:
+    opts, pos = parse_flags(argv, {
+        "listen": {"default": "127.0.0.1"},
+        "port": {"default": "8080"},
+        "open": {"bool": True, "default": False},
+    })
+    from . import web
+    port = int(opts["port"])
+    if opts["open"]:
+        import threading
+        import time
+        import webbrowser
+        threading.Timer(0.6, lambda: webbrowser.open(
+            f"http://{opts['listen']}:{port}")).start()
+    return web.run(cfg, qm, listen=opts["listen"], port=port)
 
 
 def cmd_sshkey(cfg, argv) -> int:
