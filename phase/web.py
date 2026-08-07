@@ -112,12 +112,11 @@ _VMS_TTL = 8.0       # status/ip drift matters more, but 8s is plenty fresh
 
 
 def _cache_get(key: str, ttl: float, build):
-    now = time.monotonic()
     hit = _CACHE.get(key)
-    if hit and now - hit[0] < ttl:
+    if hit and time.monotonic() - hit[0] < ttl:
         return hit[1]
     value = build()
-    _CACHE[key] = (now, value)
+    _CACHE[key] = (time.monotonic(), value)  # stamp AFTER the build
     return value
 
 
