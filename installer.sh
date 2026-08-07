@@ -1,84 +1,68 @@
 #!/usr/bin/env bash
+# phase v4 installer — runs on the PVE host (or anywhere).
+#
+#   bash installer.sh [--extra tui] [--extra notify] [--engine] [--no-start]
+#
+# Installs to /opt/phase (git checkout of v4), creates the venv through the
+# shared scripts/phase-env.sh, symlinks /usr/local/bin/phase, and records the
+# chosen extras in /var/lib/phase/install.json so `phase update` reinstalls
+# the same set. Config (/etc/phase.json) is never touched.
 set -euo pipefail
 
-# phase installer.
-#
-# Layout: the repo is checked out at WORK_DIR (/opt/phase) and a thin wrapper
-# at BIN_DIR/phase execs phase.sh from there. Updating is just `git pull` in
-# WORK_DIR — no reinstall needed for script changes.
+REPO_DIR="${PHASE_DIR:-/opt/phase}"
+BRANCH="v4"
+STATE_DIR="${PHASE_STATE_DIR:-/var/lib/phase}"
+BIN_DIR="/usr/local/bin"
 
-PREFIX="${PREFIX:-/usr/local}"
-BIN_DIR="${BIN_DIR:-$PREFIX/bin}"
-CONFIG_FILE="${CONFIG_FILE:-/etc/phase.json}"
-REPO_URL="${REPO_URL:-https://github.com/spacedouut/phase.git}"
-REF="${REF:-v3}"
-WORK_DIR="${WORK_DIR:-/opt/phase}"
-INSTALL_WRAPPER="${INSTALL_WRAPPER:-1}"
-INSTALL_CONFIG="${INSTALL_CONFIG:-1}"
+EXTRAS=()
+WITH_ENGINE=0
+ENGINE_START=1
 
-if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-  SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+while (($#)); do
+  case "$1" in
+    --extra) EXTRAS+=("${2:-}"); shift 2 ;;
+    --engine) WITH_ENGINE=1; shift ;;
+    --no-start) ENGINE_START=0; shift ;;
+    *) echo "installer: unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+
+need() { command -v "$1" >/dev/null 2>&1 || { echo "installer: missing required command: $1" >&2; exit 1; }; }
+need git
+
+echo "==> fetching phase $BRANCH into $REPO_DIR"
+if [[ -d "$REPO_DIR/.git" ]]; then
+  git -C "$REPO_DIR" fetch origin "$BRANCH"
+  git -C "$REPO_DIR" checkout -B "$BRANCH" "origin/$BRANCH"
 else
-  SOURCE_DIR=""
+  mkdir -p "$(dirname "$REPO_DIR")"
+  git clone --branch "$BRANCH" https://github.com/spacedouut/phase.git "$REPO_DIR"
 fi
 
-require_root() {
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    echo "installer must run as root" >&2
-    exit 1
-  fi
-}
+echo "==> creating venv (shared logic: scripts/phase-env.sh)"
+PY="$(bash "$REPO_DIR/scripts/phase-env.sh" "$REPO_DIR/.venv" \
+  $(for e in "${EXTRAS[@]:-}"; do printf -- '--extra %s ' "$e"; done))"
 
-main() {
-  require_root
+echo "==> installing wrapper $BIN_DIR/phase"
+cat > "$BIN_DIR/phase" <<EOF
+#!/bin/sh
+exec "$PY" -m phase "\$@"
+EOF
+chmod +x "$BIN_DIR/phase"
 
-  command -v bash >/dev/null || { echo "Missing bash (..how?)" >&2; exit 1; }
-  command -v jq >/dev/null   || { echo "Missing jq! Install with: apt install jq" >&2; exit 1; }
-  command -v qm >/dev/null   || { echo "Missing qm! (run this on a Proxmox host!)" >&2; exit 1; }
-  command -v git >/dev/null  || { echo "Missing git! Install with: apt install git" >&2; exit 1; }
-  command -v gum >/dev/null  || echo "Warning: gum not found; phase needs it for interactive prompts and spinners." >&2
+echo "==> recording install metadata"
+mkdir -p "$STATE_DIR"
+cat > "$STATE_DIR/install.json" <<EOF
+{"branch": "$BRANCH", "extras": [$(IFS=,; printf '"%s"' "${EXTRAS[*]}")], "engine": $WITH_ENGINE}
+EOF
 
-  # Ensure the checkout exists at WORK_DIR. If we're running from inside a
-  # checkout that already lives there, use it; otherwise clone/refresh.
-  if [[ "$SOURCE_DIR" == "$WORK_DIR" && -d "$WORK_DIR/.git" ]]; then
-    echo "Using existing checkout: $WORK_DIR"
-  elif [[ -d "$WORK_DIR/.git" ]]; then
-    echo "Updating existing checkout: $WORK_DIR"
-    git -C "$WORK_DIR" pull --ff-only
+if ((WITH_ENGINE)); then
+  echo "==> installing engine systemd service"
+  if ((ENGINE_START)); then
+    "$BIN_DIR/phase" engine install
   else
-    echo "Cloning $REPO_URL ($REF) into $WORK_DIR"
-    rm -rf "$WORK_DIR"
-    git clone --branch "$REF" "$REPO_URL" "$WORK_DIR"
+    "$BIN_DIR/phase" engine install --no-start
   fi
+fi
 
-  for f in phase.sh tools.sh cmds.sh; do
-    [[ -f "$WORK_DIR/$f" ]] || { echo "missing $f in $WORK_DIR" >&2; exit 1; }
-  done
-  chmod +x "$WORK_DIR/phase.sh"
-
-  if [[ "$INSTALL_WRAPPER" == "1" ]]; then
-    install -d "$BIN_DIR"
-    ln -sf "$WORK_DIR/phase.sh" "$BIN_DIR/phase"
-    echo "Installed: $BIN_DIR/phase -> $WORK_DIR/phase.sh"
-  fi
-
-  if [[ "$INSTALL_CONFIG" == "1" ]]; then
-    if [[ -f "$CONFIG_FILE" ]]; then
-      echo "Keeping existing config: $CONFIG_FILE"
-    elif [[ -f "$WORK_DIR/labctl.config.json" ]]; then
-      install -D -m 0644 "$WORK_DIR/labctl.config.json" "$CONFIG_FILE"
-      echo "Installed default config: $CONFIG_FILE"
-    else
-      echo "No default config found in $WORK_DIR; skipping config install" >&2
-    fi
-  fi
-
-  echo
-  echo "Try:"
-  echo "  phase vm plan --name redis --size micro --os ubuntu-26-lts"
-  echo "  phase vm create redis"
-  echo
-  echo "Update later with:  cd $WORK_DIR && git pull"
-}
-
-main "$@"
+echo "==> done. try: phase vm list"

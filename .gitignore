@@ -1,1 +1,7 @@
-labctl-test.sh
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+dist/
+build/
+.phase-test/

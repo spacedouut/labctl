@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Fake lspci — NVIDIA GPU present."""
+import sys
+
+print("""\
+00:00.0 Host bridge: Intel Corporation 440FX 82441FX PMC
+01:00.0 VGA compatible controller: NVIDIA Corporation TU104GL [Tesla T4] (rev a1)
+""")
+sys.exit(0)

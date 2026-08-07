@@ -1,0 +1,8 @@
+#!/usr/bin/env python3
+"""Fake `ip` — one bridge."""
+import sys
+
+if "-o" in sys.argv and "link" in sys.argv:
+    print("1: vmbr0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500")
+    sys.exit(0)
+sys.exit(1)

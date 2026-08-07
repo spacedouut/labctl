@@ -1,0 +1,195 @@
+#!/usr/bin/env python3
+"""Fake `qm` for tests — state persists in $FAKE_QM_DIR across invocations."""
+import json
+import os
+import re
+import sys
+
+STATE = os.environ.get("FAKE_QM_DIR")
+if not STATE:
+    print("fake qm needs FAKE_QM_DIR", file=sys.stderr)
+    sys.exit(2)
+os.makedirs(STATE, exist_ok=True)
+
+
+def conf_path(vmid):
+    return os.path.join(STATE, f"{vmid}.conf")
+
+
+def power_path(vmid):
+    return os.path.join(STATE, f"{vmid}.power")
+
+
+def read_conf(vmid):
+    p = conf_path(vmid)
+    if not os.path.isfile(p):
+        return None
+    conf = {}
+    for line in open(p):
+        if ":" in line:
+            k, v = line.split(":", 1)
+            conf[k.strip()] = v.strip()
+    return conf
+
+
+def write_conf(vmid, conf):
+    with open(conf_path(vmid), "w") as f:
+        for k, v in conf.items():
+            f.write(f"{k}: {v}\n")
+
+
+def get_power(vmid):
+    p = power_path(vmid)
+    return open(p).read().strip() if os.path.isfile(p) else "stopped"
+
+
+def set_power(vmid, s):
+    with open(power_path(vmid), "w") as f:
+        f.write(s + "\n")
+
+
+args = sys.argv[1:]
+cmd = args[0] if args else ""
+
+if cmd == "list":
+    print(f"{'VMID':>7}  {'NAME':<20}  {'STATUS':<10}  {'MEM(MB)':>8}  {'BOOTDISK(GB)':>13}  {'PID':>8}")
+    for fn in sorted(os.listdir(STATE)):
+        if not fn.endswith(".conf"):
+            continue
+        vmid = fn[:-5]
+        conf = read_conf(vmid)
+        name = conf.get("name", vmid)
+        mem = conf.get("memory", "0")
+        disk = "0.00"
+        for k, v in conf.items():
+            if re.fullmatch(r"scsi\d+", k):
+                m = re.search(r"size=(\d+)M", v)
+                if m:
+                    disk = f"{int(m.group(1)) / 1024:.2f}"
+                break
+        print(f"{vmid:>7}  {name:<20}  {get_power(vmid):<10}  {mem:>8}  {disk:>13}  {'0':>8}")
+elif cmd == "config":
+    vmid = args[1]
+    conf = read_conf(vmid)
+    if conf is None:
+        print(f"Configuration file does not exist", file=sys.stderr)
+        sys.exit(1)
+    for k, v in conf.items():
+        print(f"{k}: {v}")
+elif cmd == "status":
+    print(f"status: {get_power(args[1])}")
+elif cmd in ("start", "stop", "reboot", "reset", "shutdown", "suspend"):
+    vmid = args[1]
+    if cmd == "start":
+        set_power(vmid, "running")
+    elif cmd in ("stop", "shutdown"):
+        set_power(vmid, "stopped")
+    print(f"Executing {cmd} on VM {vmid}")
+elif cmd == "set":
+    vmid = args[1]
+    conf = read_conf(vmid) or {}
+    i = 2
+    while i < len(args):
+        k = args[i].lstrip("-")
+        if k == "delete":
+            for dk in args[i + 1].split(","):
+                conf.pop(dk, None)
+            i += 2
+            continue
+        v = args[i + 1] if i + 1 < len(args) else ""
+        # PVE-style disk entries: storage:vm-<id>-<key>,size=<size>
+        if re.fullmatch(r"(scsi|sata|virtio|ide)\d+", k):
+            m = re.fullmatch(r"([^:]+):(\d+[GMKT])", v)
+            if m:
+                v = f"{m.group(1)}:vm-{vmid}-{k},size={m.group(2)}"
+        conf[k] = v
+        i += 2
+    write_conf(vmid, conf)
+    print(f"update VM {vmid}")
+elif cmd == "clone":
+    src, newid = args[1], args[2]
+    conf = dict(read_conf(src) or {})
+    conf.pop("template", None)
+    i = 3
+    while i < len(args):
+        k = args[i].lstrip("-")
+        v = args[i + 1] if i + 1 < len(args) else ""
+        if k == "name":
+            conf["name"] = v
+        i += 2
+    conf.pop("vmid", None)
+    write_conf(newid, conf)
+    set_power(newid, "stopped")
+    print(f"clone {src} -> {newid}")
+elif cmd == "template":
+    vmid = args[1]
+    conf = read_conf(vmid) or {}
+    conf["template"] = "1"
+    write_conf(vmid, conf)
+    print(f"update VM {vmid}: -template 1")
+elif cmd == "resize":
+    vmid, disk, size = args[1], args[2], args[3]
+    conf = read_conf(vmid) or {}
+    cur = conf.get(disk, "")
+    m = re.search(r"size=\d+M", cur)
+    if m:
+        conf[disk] = cur.replace(m.group(0), f"size={size}")
+    write_conf(vmid, conf)
+    print(f"resize disk {disk} of VM {vmid} to {size}")
+elif cmd == "destroy":
+    vmid = args[1]
+    for p in (conf_path(vmid), power_path(vmid)):
+        if os.path.isfile(p):
+            os.unlink(p)
+    print(f"destroy VM {vmid}")
+elif cmd == "guest":
+    sub, vmid = args[1], args[2]
+    if sub == "cmd":
+        gcmd = args[3]
+        if gcmd == "ping":
+            sys.exit(0 if get_power(vmid) == "running" else 1)
+        if gcmd == "network-get-interfaces":
+            ip = f"10.10.1.{int(vmid) - 100}"
+            print(json.dumps([
+                {"hardware-address": "00:00:00:00:00:00", "name": "lo",
+                 "ip-addresses": [{"ip-address": "127.0.0.1",
+                                   "ip-address-type": "ipv4", "prefix": 8}]},
+                {"hardware-address": "bc:24:11:00:00:00", "name": "eth0",
+                 "ip-addresses": [{"ip-address": ip, "ip-address-type": "ipv4",
+                                   "prefix": 24}]},
+            ]))
+        sys.exit(0)
+    if sub == "exec":
+        if "--pass-stdin" in args:
+            data = sys.stdin.read()
+            cap = os.environ.get("FAKE_QM_CAPTURE")
+            if cap:
+                with open(os.path.join(STATE, "exec-stdin.log"), "a") as f:
+                    f.write(f"{vmid}: {data[:200]}\n")
+        print(json.dumps({"exited": True, "exitcode": 0, "out-data": "", "err-data": ""}))
+        sys.exit(0)
+    if sub == "exec-status":
+        print(json.dumps({"exited": True, "exitcode": 0, "out-data": "", "err-data": ""}))
+        sys.exit(0)
+elif cmd == "listsnapshot":
+    snaps = []
+    for fn in sorted(os.listdir(STATE)):
+        if fn.startswith("snap-") and fn.endswith(".json"):
+            data = json.load(open(os.path.join(STATE, fn)))
+            if str(data["vmid"]) == args[1]:
+                snaps.append(data)
+    print("+-------+-------------+--------+")
+    print("| Name  | Description | VMState|")
+    print("+-------+-------------+--------+")
+    for s in snaps:
+        print(f"| {s['name']:<5} | {'':<11} | {'yes':<7}|")
+    print("+-------+-------------+--------+")
+elif cmd == "snapshot":
+    with open(os.path.join(STATE, f"snap-{args[2]}.json"), "w") as f:
+        json.dump({"vmid": int(args[1]), "name": args[2]}, f)
+    print(f"create snapshot {args[2]} of VM {args[1]}")
+elif cmd == "rollback":
+    print(f"rollback VM {args[1]} to snapshot {args[2]}")
+else:
+    print(f"fake qm: unhandled: {args}", file=sys.stderr)
+    sys.exit(1)

@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+"""Fake mdevctl — vGPU mediated device types."""
+import sys
+
+print("""\
+nvidia-223
+  device_api=vfio-pci
+  available_instances=4
+  name=GRID RTX6000-2Q
+nvidia-217
+  device_api=vfio-pci
+  available_instances=1
+  name=GRID RTX6000-1A
+""")
+sys.exit(0)
