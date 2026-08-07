@@ -39,7 +39,7 @@ if [[ -n "$UV_BIN" ]]; then
   mkdir -p "$VENV_DIR"
   PY_ARGS=()
   [[ -n "$PYVER" ]] && PY_ARGS+=(--python "$PYVER")
-  "$UV_BIN" venv "$VENV_DIR" "${PY_ARGS[@]}"
+  "$UV_BIN" venv "$VENV_DIR" "${PY_ARGS[@]}" --clear
   INSTALL_ARGS=(--python "$VENV_DIR/bin/python")
   if ((${#EXTRAS[@]})); then
     INSTALL_ARGS+=("-e" ".[$(IFS=,; echo "${EXTRAS[*]}")]")
