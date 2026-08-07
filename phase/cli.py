@@ -303,10 +303,9 @@ def cmd_vm_connect(cfg, qm, argv) -> int:
         die(f"no guest-agent IPv4 found for {name}; try --ip or --serial")
 
     ssh = shutil.which("ssh") or die("ssh not found")
-    known = has_known_ssh_key(qm, vmid)
     args = [ssh]
     keyfile = None
-    if not known and not opts["no-key-check"]:
+    if not has_known_ssh_key(qm, vmid) and not opts["no-key-check"]:
         if opts["no-ephemeral"]:
             warn("no local key found in cloud-init sshkeys for " + name)
         else:

@@ -303,6 +303,7 @@ def test_web_api():
 
     tmp = fresh_tmp()
     os.environ.update({k: v for k, v in _env(tmp).items()})
+    os.environ["PHASE_WEB_TEST_SSH_CMD"] = "cat"
     cfg = Config.load()
     qm = Qm(make_transport(None))
     port = 8931
@@ -321,10 +322,23 @@ def test_web_api():
                            headers={"Content-Type": "application/json"})
         return _json.loads(_url.urlopen(req).read())
 
+    def wait_task(tid, timeout=10):
+        end = _time.time() + timeout
+        while _time.time() < end:
+            r = get("/api/task/" + tid)
+            if r["status"] != "running":
+                return r
+            _time.sleep(0.2)
+        raise AssertionError("task timeout")
+
     meta = get("/api/meta")
     check("web meta sizes+oses", "small" in meta["sizes"] and "ubuntu-26" in meta["oses"])
     page = _url.urlopen(base + "/").read().decode()
     check("web page served", "Machine configuration" in page and "Finalize" in page)
+    js = _url.urlopen(base + "/app.js").read().decode()
+    check("web app.js served", "openTerminal" in js)
+    xterm = _url.urlopen(base + "/static/xterm.js").read()
+    check("web xterm served", len(xterm) > 100000)
 
     state = {
         "name": "webvm1", "size": "small", "cores": "", "memory": "",
@@ -345,6 +359,69 @@ def test_web_api():
     check("web create vm", r4["ok"] and r4["vmid"])
     full = get("/api/plans/webvm1")
     check("web load plan", full["name"] == "webvm1" and len(full["disks"]) == 2)
+
+    # --- vm management ---
+    vms = get("/api/vms")
+    check("web vms list", any(v["name"] == "webvm1" for v in vms))
+    detail = get("/api/vms/webvm1")
+    check("web vm detail", detail["cores"] == "2" and len(detail["disks"]) == 2)
+    check("web vm detail boot disk", detail["disks"][0]["os"] is True)
+
+    tr = wait_task(post("/api/vms/webvm1/power", {"action": "stop"})["task"])
+    check("web power stop", tr["status"] == "done")
+    check("web vm stopped", get("/api/vms/webvm1")["status"] == "stopped")
+
+    te = wait_task(post("/api/vms/webvm1/edit", {"cores": "4", "memory": "4096",
+                                                 "tags": ["web", "prod"]})["task"])
+    check("web edit", te["status"] == "done")
+    d2 = get("/api/vms/webvm1")
+    check("web edit applied", d2["cores"] == "4" and "prod" in d2["tags"])
+
+    ts = wait_task(post("/api/vms/webvm1/snapshot", {"name": "snap1"})["task"])
+    check("web snapshot", ts["status"] == "done")
+    check("web snapshots list", any(s["name"] == "snap1"
+                                     for s in get("/api/vms/webvm1/snapshots")))
+
+    tf = wait_task(post("/api/vms/webvm1/firewall",
+                        {"from": "lan", "port": "22"})["task"])
+    check("web firewall add", tf["status"] == "done")
+
+    td = wait_task(post("/api/vms/webvm1/destroy", {})["task"])
+    check("web destroy", td["status"] == "done")
+    check("web vm gone", not any(v["name"] == "webvm1" for v in get("/api/vms")))
+
+    # --- websocket terminal (test hook spawns `cat`) ---
+    import socket as _socket
+    import base64 as _b64
+    import hashlib as _sha
+    create = post("/api/create", {"state": dict(state, name="wsvm")})
+    check("web create for ws", create["ok"])
+    s = _socket.create_connection(("127.0.0.1", port), timeout=5)
+    key = _b64.b64encode(os.urandom(16)).decode()
+    s.sendall((f"GET /api/ssh/wsvm HTTP/1.1\r\nHost: x\r\n"
+               f"Upgrade: websocket\r\nConnection: Upgrade\r\n"
+               f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n\r\n").encode())
+    resp = b""
+    while b"\r\n\r\n" not in resp:
+        resp += s.recv(4096)
+    check("ws handshake 101", b"101" in resp.split(b"\r\n")[0])
+    # send masked text frame "ping\n"
+    payload = b"ping\n"
+    mask = os.urandom(4)
+    masked = bytes(b ^ mask[i % 4] for i, b in enumerate(payload))
+    frame = bytes([0x81, 0x80 | len(payload)]) + mask + masked
+    s.sendall(frame)
+    got = b""
+    end = _time.time() + 5
+    while _time.time() < end:
+        data = s.recv(4096)
+        if not data:
+            break
+        got += data
+        if b"ping" in got:
+            break
+    check("ws echo through terminal", b"ping" in got)
+    s.close()
 
     # token gate
     port2 = 8932

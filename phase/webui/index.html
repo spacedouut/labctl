@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phase · VM console</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/static/xterm.css">
+</head>
+<body>
+<header>
+  <h1>phase <span style="color:var(--muted);font-weight:400">· VM console</span></h1>
+  <span class="host" id="hostline"></span>
+  <nav class="tabs">
+    <button id="tab-create" class="active">Create VM</button>
+    <button id="tab-vms">VMs</button>
+  </nav>
+  <span class="spacer"></span>
+  <label style="color:var(--muted);font-size:13px">Load plan
+    <select id="loadplan" style="margin-left:8px"></select>
+  </label>
+  <button class="btn ghost" id="btn-refresh">↻</button>
+</header>
+<div id="wrap">
+
+  <!-- ================= CREATE ================= -->
+  <main id="view-create">
+    <nav class="sec-tabs">
+      <button data-sec="machine" class="active">Machine</button>
+      <button data-sec="disks">Disks</button>
+      <button data-sec="network">Network</button>
+      <button data-sec="others">Others</button>
+      <button data-sec="finalize">Finalize</button>
+    </nav>
+    <div id="pane-machine" class="pane">
+      <h2>Machine configuration</h2>
+      <div class="sub">Basics, sizing, and operating system.</div>
+      <div class="card">
+        <h3>Basics</h3>
+        <div class="row">
+          <div class="field"><label>Name</label>
+            <input type="text" id="f-name" placeholder="e.g. postgres" spellcheck="false"></div>
+          <div class="field" style="flex:1"><label>Description</label>
+            <input type="text" id="f-desc" placeholder="optional" spellcheck="false"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Size preset</h3>
+        <div class="chips" id="size-chips"></div>
+      </div>
+      <div class="card">
+        <h3>Overrides <span style="text-transform:none;color:var(--muted)">(blank = size default)</span></h3>
+        <div class="row">
+          <div class="field"><label>vCPUs</label><input type="number" id="f-cores" min="1" placeholder="auto"></div>
+          <div class="field"><label>Memory (MB)</label><input type="number" id="f-memory" min="128" placeholder="auto"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Operating system</h3>
+        <div class="field"><label>Template</label><select id="f-os"></select></div>
+      </div>
+    </div>
+
+    <div id="pane-disks" class="pane hide">
+      <h2>Disks</h2>
+      <div class="sub">One list — mark a disk as boot.</div>
+      <div class="card">
+        <h3>Disks</h3>
+        <table id="disk-table">
+          <thead><tr><th></th><th>ID</th><th>Size</th><th>Storage</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="row disk-addrow">
+          <input type="text" id="disk-new-id" placeholder="id (scsi1)" spellcheck="false">
+          <input type="text" id="disk-new-size" placeholder="size (50G)" spellcheck="false">
+          <input type="text" id="disk-new-storage" placeholder="storage (nas)" spellcheck="false">
+          <button class="btn ghost" id="disk-add">＋ Add disk</button>
+        </div>
+        <div class="hint">Click a radio to make that disk the boot disk.</div>
+      </div>
+    </div>
+
+    <div id="pane-network" class="pane hide">
+      <h2>Network</h2>
+      <div class="sub">Bridge, VLAN, and IP addressing.</div>
+      <div class="card">
+        <div class="row">
+          <div class="field"><label>Bridge</label><select id="f-bridge"></select></div>
+          <div class="field"><label>VLAN tag</label>
+            <input type="text" id="f-vlan" placeholder="blank = none" spellcheck="false"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>IP mode</h3>
+        <label class="radio"><input type="radio" name="ipmode" value="dhcp" checked> DHCP</label>
+        <label class="radio"><input type="radio" name="ipmode" value="static"> Static</label>
+        <div class="row" id="static-fields" style="margin-top:10px">
+          <div class="field"><label>IP address</label>
+            <input type="text" id="f-ip" placeholder="10.10.1.50/24" spellcheck="false"></div>
+          <div class="field"><label>Gateway</label>
+            <input type="text" id="f-gw" placeholder="10.10.1.1" spellcheck="false"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="pane-others" class="pane hide">
+      <h2>Others</h2>
+      <div class="sub">Tags, lifecycle flags, GPU, bootstrap.</div>
+      <div class="card">
+        <div class="row">
+          <div class="field" style="flex:1"><label>Tags (comma separated)</label>
+            <input type="text" id="f-tags" placeholder="db,prod" spellcheck="false"></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-onboot" checked> Start on boot</label>
+        <label class="toggle"><input type="checkbox" id="f-protect"> Protected (no accidental destroy)</label>
+      </div>
+      <div class="card">
+        <h3>GPU</h3>
+        <div class="field"><label>mdev (optional)</label>
+          <input type="text" id="f-gpu" placeholder="e.g. nvidia-223" spellcheck="false"></div>
+      </div>
+      <div class="card">
+        <h3>Bootstrap steps</h3>
+        <label class="toggle"><input type="checkbox" id="f-bs-system"> system (apt upgrade, ufw, fail2ban)</label>
+        <label class="toggle"><input type="checkbox" id="f-bs-docker"> docker</label>
+        <label class="toggle"><input type="checkbox" id="f-bs-tailscale"> tailscale</label>
+      </div>
+      <div class="card">
+        <h3>SSH key</h3>
+        <div class="field"><label>From the config pool</label><select id="f-sshkey"></select></div>
+      </div>
+    </div>
+
+    <div id="pane-finalize" class="pane hide">
+      <h2>Finalize</h2>
+      <div class="sub">Review the plan, then create.</div>
+      <div class="card">
+        <h3>Will create</h3>
+        <div id="review"></div>
+      </div>
+      <div id="errors"></div>
+      <div class="actions">
+        <button class="btn" id="act-create">⚙  Create</button>
+        <button class="btn" id="act-provision">🚀 Create + provision</button>
+        <button class="btn ghost" id="act-save">💾 Save plan only</button>
+      </div>
+    </div>
+  </main>
+
+  <!-- ================= VMS LIST ================= -->
+  <main id="view-vms" class="hide">
+    <h2>VMs <span class="sub" id="vms-count"></span></h2>
+    <div class="card">
+      <table id="vms-table">
+        <thead><tr><th>Name</th><th>VMID</th><th>Status</th><th>IP</th>
+          <th>vCPU</th><th>RAM</th><th>Tags</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </main>
+
+  <!-- ================= VM DETAIL ================= -->
+  <main id="view-detail" class="hide">
+    <div id="detail-top">
+      <h2 id="detail-name"></h2>
+      <span class="badge" id="detail-status"></span>
+      <span class="sub" id="detail-ip"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="btn-ssh">⌨ SSH</button>
+      <button class="btn ghost" id="btn-back">← VMs</button>
+    </div>
+    <div id="detail-body"></div>
+  </main>
+</div>
+
+<div id="toast"></div>
+
+<!-- terminal modal -->
+<div id="term-modal" class="hide">
+  <div id="term-box">
+    <div id="term-head">terminal <span id="term-title"></span>
+      <button id="term-close">✕</button></div>
+    <div id="term"></div>
+  </div>
+</div>
+
+<script src="/static/xterm.js"></script>
+<script src="/static/xterm-addon-fit.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

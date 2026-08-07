@@ -171,6 +171,43 @@ def has_known_ssh_key(qm, vmid: int) -> bool:
     return any(k and k in vmkeys for k in local_public_keys())
 
 
+def ssh_argv(cfg, qm, user: str, ip: str, vmid: int,
+             no_key_check: bool = False, extra: list[str] | None = None,
+             quiet: bool = False) -> tuple[list[str], str | None]:
+    """Build `ssh` argv (after the binary) for user@ip.
+
+    When the VM has no known key, installs an ephemeral key through the guest
+    agent (gcloud-style) so the session works. Returns (argv, keyfile) — the
+    caller must unlink keyfile when the session ends.
+    """
+    import shutil
+    import subprocess
+    import tempfile
+    from .util import die, warn
+    ssh = shutil.which("ssh") or die("ssh not found")
+    argv: list[str] = []
+    keyfile = None
+    if not has_known_ssh_key(qm, vmid) and not no_key_check:
+        if not quiet:
+            warn("no known key — generating ephemeral key (gcloud-style)")
+        keygen = shutil.which("ssh-keygen") or die("ssh-keygen not found")
+        fd, keyfile = tempfile.mkstemp(prefix="phase-eph-")
+        os.close(fd)
+        subprocess.run([keygen, "-t", "ed25519", "-f", keyfile, "-N", "",
+                        "-q", "-C", "phase-ephemeral"], check=True)
+        pub = open(keyfile + ".pub").read().strip()
+        qm.guest_exec_stdin(
+            vmid,
+            pub + "\n",
+            ["bash", "-lc",
+             "mkdir -p ~/.ssh && chmod 700 ~/.ssh && "
+             "cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"],
+        )
+        argv += ["-i", keyfile]
+    argv += [f"{user}@{ip}"] + (extra or [])
+    return argv, keyfile
+
+
 def read_key_spec(spec: str) -> str:
     if os.path.isfile(spec):
         try:
