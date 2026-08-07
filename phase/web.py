@@ -108,15 +108,37 @@ def _meta(cfg, qm) -> dict:
 
 _CACHE: dict = {}
 _META_TTL = 30.0     # templates/sizes/plans change rarely
-_VMS_TTL = 8.0       # status/ip drift matters more, but 8s is plenty fresh
+_VMS_TTL = 8.0       # status/ip freshness target
+_STALE_MAX = 120.0   # never block a page load: serve up to 2min-old data
 
 
 def _cache_get(key: str, ttl: float, build):
+    """Serve cached data; when stale, refresh in the background (SWR).
+
+    The very first build for a key blocks (cold path — the server warms
+    both caches at startup so that's rare). Every later request is served
+    immediately from cache; stale entries are re-built on a daemon thread
+    so a slow 10s qm build never blocks the UI again.
+    """
     hit = _CACHE.get(key)
-    if hit and time.monotonic() - hit[0] < ttl:
-        return hit[1]
+    if hit is not None:
+        age = time.monotonic() - hit["ts"]
+        if age < _STALE_MAX:
+            if age >= ttl and not hit.get("building"):
+                hit["building"] = True
+
+                def _refresh():
+                    try:
+                        value = build()
+                        _CACHE[key] = {"ts": time.monotonic(), "value": value}
+                    except Exception:  # noqa: BLE001 — keep stale on failure
+                        _CACHE[key] = {"ts": hit["ts"], "value": hit["value"]}
+
+                threading.Thread(target=_refresh, daemon=True).start()
+            return hit["value"]
+        # too old to serve: fall through to a fresh build
     value = build()
-    _CACHE[key] = (time.monotonic(), value)  # stamp AFTER the build
+    _CACHE[key] = {"ts": time.monotonic(), "value": value}
     return value
 
 
