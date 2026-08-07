@@ -905,17 +905,27 @@ def cmd_update() -> int:
     repo = "/opt/phase"
     if not os.path.isdir(os.path.join(repo, ".git")):
         die("update requires a git checkout at /opt/phase")
-    for bin_ in ("git",):
-        if not shutil.which(bin_):
-            die(f"missing required command: {bin_}")
+    if not shutil.which("git"):
+        die("missing required command: git")
     log("Updating phase...")
     subprocess.run(["git", "-C", repo, "fetch", "origin", "v4"], check=True)
     subprocess.run(["git", "-C", repo, "checkout", "-B", "v4", "origin/v4"],
                    check=True)
-    # Re-run installer; extras recorded by the installer are preserved.
+    # Re-run the installer with the extras recorded at install time.
     installer = os.path.join(repo, "installer.sh")
     if os.path.isfile(installer):
-        subprocess.run(["bash", installer], check=True)
+        args = ["bash", installer]
+        meta = os.path.join(state_dir(), "install.json")
+        try:
+            with open(meta) as f:
+                saved = json.load(f)
+            for extra in saved.get("extras") or []:
+                args += ["--extra", extra]
+            if saved.get("engine"):
+                args.append("--engine")
+        except (OSError, ValueError):
+            pass  # first install: no metadata yet
+        subprocess.run(args, check=True)
     log("Update complete.")
     return 0
 
