@@ -368,7 +368,6 @@ async function loadVms() {
     tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
     return;
   }
-  const tb = $("vms-table").querySelector("tbody");
   tb.innerHTML = "";
   $("vms-count").textContent = `(${vms.length})`;
   vms.forEach(v => {
