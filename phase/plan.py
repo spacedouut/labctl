@@ -183,6 +183,8 @@ def gather_plan(cfg, qm, argv: list[str], name_hint: str = "") -> dict:
     plan_os = os_disks[0]["os"] if os_disks else os_
 
     # Size: preset, custom (--cores/--memory), or auto (derive from template).
+    # Presets can be overridden per-field: --size small --cores 4 keeps the
+    # small memory and bumps vCPUs (wizard resources step).
     cores, memory = opts["cores"], opts["memory"]
     if size == "auto":
         tpl = resolve_template(cfg, qm, plan_os)
@@ -191,9 +193,9 @@ def gather_plan(cfg, qm, argv: list[str], name_hint: str = "") -> dict:
         memory = tconf.get("memory", "1024")
         size = "auto"
     elif size != "":
-        if cores or memory:
-            die("--cores/--memory cannot be combined with --size")
-        cores, memory = resolve_size(cfg, size)
+        preset_cores, preset_mem = resolve_size(cfg, size)
+        cores = opts["cores"] or preset_cores
+        memory = opts["memory"] or preset_mem
     else:
         die("missing required field: --size (or --cores/--memory for custom)")
     cores, memory = str(cores), str(memory)

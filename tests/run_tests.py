@@ -270,6 +270,146 @@ def test_tui():
     shutil.rmtree(tmp)
 
 
+def test_wizard_units():
+    print("wizard pure units")
+    from phase.wizard import plan_argv, validate_step, summary_line
+
+    state = {
+        "name": "postgres", "description": "", "tags": ["db", "prod"],
+        "onboot": True, "protect": False, "size": "small", "cores": "",
+        "memory": "", "gpu": "", "os": "ubuntu-26",
+        "os_disk_size": "30G", "os_disk_storage": "",
+        "data_disks": [{"id": "scsi1", "size": "50G", "storage": "nas"}],
+        "bridge": "lan", "vlan": "", "ipmode": "static", "ip": "10.10.1.50/24",
+        "gw": "10.10.1.1",
+        "bootstrap": {"system": True, "docker": False, "tailscale": True},
+        "ssh_keys": [],
+    }
+    argv = plan_argv(state, "create")
+    check("plan_argv name/size/os",
+          argv[:8] == ["vm", "create", "--name", "postgres", "--size", "small",
+                       "--os", "ubuntu-26"])
+    check("plan_argv os disk spec", "--disk" in argv and "scsi0:os:ubuntu-26:30G" in argv)
+    check("plan_argv data disk", "scsi1:data:50G:nas" in argv)
+    check("plan_argv net", "--bridge" in argv and "lan" in argv and "--ip" in argv
+          and "10.10.1.50/24" in argv and "--gw" in argv)
+    check("plan_argv bootstrap", "--system" in argv and "--tailscale" in argv
+          and "--docker" not in argv)
+    check("plan_argv tags", argv.count("--tag") == 2)
+    check("plan_argv save flag", plan_argv(state, "plan")[-1] == "--save")
+
+    over = dict(state, cores="4", memory="8192")
+    a2 = plan_argv(over, "create")
+    check("plan_argv overrides", "--cores" in a2 and "4" in a2 and "8192" in a2)
+
+    check("validate good basics", validate_step(state, 1) == [])
+    bad = dict(state, name="Bad Name!")
+    check("validate bad name", any("name" in e for e in validate_step(bad, 1)))
+    check("validate empty name", any("required" in e
+                                      for e in validate_step(dict(state, name=""), 1)))
+    bad_disk = dict(state, data_disks=[{"id": "nvme0", "size": "50G"}])
+    check("validate bad disk id", any("disk" in e for e in validate_step(bad_disk, 3)))
+    bad_ip = dict(state, ip="")
+    check("validate static w/o ip", any("IP" in e for e in validate_step(bad_ip, 4)))
+    dhcp = dict(state, ipmode="dhcp", ip="")
+    check("validate dhcp ok", validate_step(dhcp, 4) == [])
+    bad_cores = dict(state, cores="lots")
+    check("validate bad cores", any("cores" in e for e in validate_step(bad_cores, 2)))
+
+    sizes = {"small": {"cores": 2, "memory": 2048}}
+    line = summary_line(state, sizes)
+    check("summary has name+size+os", "postgres" in line and "small" in line
+          and "ubuntu-26" in line and "2c/2048MB" in line)
+    check("summary shows disks+net+ip", "2 disks" in line and "lan" in line
+          and "10.10.1.50/24" in line)
+    check("summary shows bootstrap", "system+tailscale" in line)
+
+
+def test_wizard_tui():
+    print("wizard headless (textual)")
+    try:
+        import textual  # noqa
+    except ImportError:
+        print("  - textual not installed, skipping")
+        return
+    import asyncio
+    import os as _os
+    from phase.tui import PhaseApp
+    from phase.wizard import CreateWizardScreen
+
+    tmp = fresh_tmp()
+    env = _env(tmp)
+    _os.environ.update({k: v for k, v in env.items()})
+    _os.environ["PHASE_BIN"] = _os.path.join(ROOT, "bin", "phase")
+
+    async def drive():
+        app = PhaseApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("down", "enter")   # menu → Create VM
+            await pilot.pause()
+            wiz = app.screen
+            check("wizard opens from menu", isinstance(wiz, CreateWizardScreen))
+            check("step 1 shown by default",
+                  wiz.query_one("#pane-basics").display
+                  and not wiz.query_one("#pane-review").display)
+            # empty name blocks Enter with an error
+            await pilot.press("enter")
+            await pilot.pause()
+            check("empty name blocked", "name is required"
+                  in str(wiz.query_one("#err-basics").content))
+            # type a name, advance via Enter
+            await pilot.press(*list("postgres"))
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            check("enter advances to resources", wiz.query_one("#pane-resources").display)
+            # jump to disks, add a data disk
+            await pilot.press("3")
+            await pilot.pause()
+            check("jump to disks", wiz.query_one("#pane-disks").display)
+            await pilot.press("tab")  # os-disk-size → os-disk-storage
+            await pilot.press("tab")  # → in-disk-id
+            await pilot.press(*list("scsi1"))
+            await pilot.press("tab")
+            await pilot.press(*list("50G"))
+            await pilot.press("tab")
+            await pilot.press(*list("nas"))
+            await pilot.press("tab")  # → disk-add button
+            await pilot.press("enter")  # press it
+            await pilot.pause()
+            check("data disk added", len(wiz.data_disks) == 1
+                  and wiz.data_disks[0]["id"] == "scsi1")
+            # network + bootstrap + review
+            await pilot.press("4")
+            await pilot.pause()
+            check("jump to network", wiz.query_one("#pane-network").display)
+            await pilot.press("5")
+            await pilot.pause()
+            await pilot.press("tab")  # bs-system → bs-docker
+            await pilot.press("space")  # toggle docker
+            await pilot.pause()
+            await pilot.press("6")
+            await pilot.pause()
+            check("review shown", wiz.query_one("#pane-review").display)
+            summary = wiz.query_one("#wiz-summary").content
+            check("summary live", "postgres" in str(summary) and "2 disks" in str(summary))
+            cmd = str(wiz.query_one("#review-cmd").content)
+            check("review shows exact command", "phase vm create --name postgres" in cmd
+                  and "--size small" in cmd and "--os ubuntu-26" in cmd)
+            # save the plan (s) → shell-out writes the plan file
+            await pilot.press("s")
+            for _ in range(10):
+                await pilot.pause()
+                if not wiz._busy:
+                    break
+            plan_file = _os.path.join(tmp, "plans", "postgres.json")
+            check("s saves a plan", _os.path.isfile(plan_file))
+
+    asyncio.run(drive())
+    shutil.rmtree(tmp)
+
+
 def test_engine_daemon():
     print("engine daemon (socket rpc)")
     tmp = fresh_tmp()
@@ -308,7 +448,8 @@ def test_engine_daemon():
 def main():
     global failed
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
-             test_dry_run, test_engine_daemon, test_tui]
+             test_dry_run, test_engine_daemon, test_tui,
+             test_wizard_units, test_wizard_tui]
     for t in tests:
         try:
             t()

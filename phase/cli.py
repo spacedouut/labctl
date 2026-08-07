@@ -747,7 +747,11 @@ def cmd_plan_group(cfg, qm, argv, json_out) -> int:
     if sub == "show":
         if not rest:
             die("usage: phase plan show <name>")
-        print_plan(cfg, qm, read_plan(rest[0]))
+        plan = read_plan(rest[0])
+        if json_out:
+            log(json.dumps(plan, indent=2))
+        else:
+            print_plan(cfg, qm, plan)
         return 0
     if sub == "rm":
         if not rest:

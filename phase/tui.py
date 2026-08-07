@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import os
-import shlex
 import shutil
 import subprocess
 
@@ -51,11 +50,11 @@ def _run_phase(cfg_path, host, *args, json_out=False) -> tuple[int, str]:
 
 from textual.app import App, ComposeResult  # noqa: E402
 from textual.binding import Binding  # noqa: E402
-from textual.containers import Horizontal, Vertical  # noqa: E402
 from textual.screen import Screen  # noqa: E402
-from textual.widgets import (Button, DataTable, Footer, Header, Input,  # noqa: E402
-                             Label, ListItem, ListView, RichLog, Select,
-                             Static)  # noqa: E402
+from textual.widgets import (DataTable, Footer, Header, Label, ListItem,  # noqa: E402
+                             ListView, RichLog, Static)  # noqa: E402
+
+from .wizard import CreateWizardScreen, _last_json  # noqa: E402
 
 
 class PhaseApp(App):
@@ -103,7 +102,7 @@ class MenuScreen(Screen):
         if item_id == "menu-vms":
             self.app.push_screen(VMsScreen(self.cfg_path, self.host))
         elif item_id == "menu-create":
-            self.app.push_screen(CreateScreen(self.cfg_path, self.host))
+            self.app.push_screen(CreateWizardScreen(self.cfg_path, self.host))
         elif item_id == "menu-templates":
             self.app.push_screen(TemplatesScreen(self.cfg_path, self.host))
         elif item_id == "menu-engine":
@@ -160,7 +159,7 @@ class VMsScreen(_PhaseScreen):
         self.rows = []
         if rc == 0:
             try:
-                data = json.loads(out.splitlines()[-1] if out else "[]")
+                data = _last_json(out) or []
             except json.JSONDecodeError:
                 data = []
             for r in data:
@@ -175,7 +174,7 @@ class VMsScreen(_PhaseScreen):
         self.load()
 
     def action_create(self):
-        self.app.push_screen(CreateScreen(self.cfg_path, self.host))
+        self.app.push_screen(CreateWizardScreen(self.cfg_path, self.host))
 
     def action_detail(self):
         table = self.query_one(DataTable)
@@ -232,33 +231,6 @@ class VMDetailScreen(_PhaseScreen):
             self.log_console.write(f"unknown action: {item_id}")
 
 
-class CreateScreen(_PhaseScreen):
-    BINDINGS = [Binding("escape", "app.pop_screen", "back")]
-
-    def compose(self) -> ComposeResult:
-        yield Static("Create VM — fill in and hit Create", id="create-head")
-        yield Label("name (e.g. postgres)")
-        yield Input(placeholder="postgres", id="name")
-        yield Label("size")
-        yield Select([("micro", "micro"), ("small", "small"), ("standard", "standard"),
-                      ("medium", "medium"), ("large", "large")], value="small", id="size")
-        yield Label("os (template suffix, e.g. ubuntu-26)")
-        yield Input(placeholder="ubuntu-26", id="os")
-        yield Label("extra flags (e.g. --tag db --disk scsi1:data::50G:nas)")
-        yield Input(placeholder="", id="extra")
-        yield Button("Create", id="create-btn", variant="primary")
-        yield RichLog(highlight=True, wrap=True, id="create-log")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id != "create-btn":
-            return
-        name = self.query_one("#name", Input).value.strip()
-        size = self.query_one("#size", Select).value or "small"
-        os_ = self.query_one("#os", Input).value.strip() or "ubuntu-26"
-        extra = shlex.split(self.query_one("#extra", Input).value or "")
-        self.run_cmd("vm", "create", name, "--size", size, "--os", os_, *extra)
-
-
 class TemplatesScreen(_PhaseScreen):
     BINDINGS = [
         Binding("r", "refresh", "refresh"),
@@ -281,7 +253,7 @@ class TemplatesScreen(_PhaseScreen):
         table.clear()
         if rc == 0:
             try:
-                data = json.loads(out.splitlines()[-1] if out else "[]")
+                data = _last_json(out) or []
             except json.JSONDecodeError:
                 data = []
             for r in data:
