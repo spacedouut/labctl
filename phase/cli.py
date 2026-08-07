@@ -559,7 +559,8 @@ def cmd_vm_rename(cfg, qm, name, new_name) -> int:
 
 
 def cmd_vm_destroy(cfg, qm, name, rest) -> int:
-    opts, pos = parse_flags(rest, {"force": {"bool": True, "default": False}})
+    opts, pos = parse_flags(rest, {"force": {"bool": True, "default": False},
+                                  "yes": {"bool": True, "default": False}})
     vmid = find_vmid(qm, name)
     status = qm.status(vmid)
     tags = vm_tags(qm, vmid)
@@ -571,8 +572,9 @@ def cmd_vm_destroy(cfg, qm, name, rest) -> int:
     if opts["force"]:
         if not (name.startswith("tmp-") or name.startswith("lab-")):
             die("--force is only allowed for tmp-* or lab-* VMs")
-    elif not confirm(f"Type '{name}' to permanently destroy this VM"):
-        die("confirmation did not match; aborting")
+    elif not opts["yes"]:
+        if not confirm(f"Type '{name}' to permanently destroy this VM"):
+            die("confirmation did not match; aborting")
     try:
         qm.stop(vmid)
     except PhaseError:

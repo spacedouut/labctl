@@ -212,6 +212,25 @@ def test_template_pipeline():
     shutil.rmtree(tmp)
 
 
+def test_destroy_yes():
+    print("destroy --yes")
+    tmp = fresh_tmp()
+    # non-tty without --yes: confirmation aborts (safe default)
+    try:
+        phase(tmp, "vm", "create", "tmp-gone", "--size", "micro", "--os", "ubuntu-26")
+        p = subprocess.run([sys.executable, BIN, "vm", "tmp-gone", "destroy"],
+                           capture_output=True, text=True, env=_env(tmp), cwd=ROOT)
+        check("destroy without --yes aborts non-tty", p.returncode != 0
+              and "aborting" in p.stderr)
+        # --yes skips the typed confirmation
+        out, _ = phase(tmp, "vm", "tmp-gone", "destroy", "--yes")
+        check("destroy --yes works", "Destroyed tmp-gone" in out)
+        out, _ = phase(tmp, "vm", "list")
+        check("destroyed vm gone", "tmp-gone" not in out)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def test_dry_run():
     print("dry-run")
     tmp = fresh_tmp()
@@ -245,6 +264,7 @@ def test_tui():
         print("  - textual not installed, skipping")
         return
     import asyncio
+    from textual.widgets import Button, DataTable, ListView
     from phase.tui import PhaseApp
 
     tmp = fresh_tmp()
@@ -265,6 +285,49 @@ def test_tui():
             await pilot.press("up", "up", "enter")  # VMs (back to top of menu)
             await pilot.pause()
             check("tui vm screen", "VMsScreen" in app.screen.__class__.__name__)
+            # wait for rows, open detail
+            table = app.screen.query_one("#vms-table", DataTable)
+            for _ in range(20):
+                await pilot.pause()
+                if table.row_count:
+                    break
+            check("vm table populated", table.row_count > 0)
+            await pilot.press("enter")
+            await pilot.pause()
+            check("vm detail screen", "VMDetailScreen" in app.screen.__class__.__name__)
+            detail = app.screen
+            actions = detail.query_one(ListView)
+            # stop (hard) -> confirm modal; Esc = No
+            actions.index = 4
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            check("confirm modal on stop", "ConfirmScreen" in app.screen.__class__.__name__)
+            await pilot.press("escape")
+            await pilot.pause()
+            check("confirm Esc cancels", "VMDetailScreen" in app.screen.__class__.__name__)
+            # destroy -> type-the-name modal
+            actions = detail.query_one(ListView)
+            actions.index = 15
+            await pilot.pause()
+            await pilot.press("enter")
+            await pilot.pause()
+            check("destroy modal", "DestroyScreen" in app.screen.__class__.__name__)
+            ds = app.screen
+            await pilot.press(*list("nope"))
+            await pilot.pause()
+            check("wrong name keeps destroy disabled",
+                  ds.query_one("#go", Button).disabled)
+            # clear and type the real name
+            for _ in range(4):
+                await pilot.press("backspace")
+            name = detail.vm_name
+            await pilot.press(*list(name))
+            await pilot.pause()
+            check("matching name enables destroy",
+                  not ds.query_one("#go", Button).disabled)
+            await pilot.press("escape")  # cancel the destroy
+            await pilot.pause()
 
     asyncio.run(drive())
     shutil.rmtree(tmp)
@@ -448,7 +511,7 @@ def test_engine_daemon():
 def main():
     global failed
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
-             test_dry_run, test_engine_daemon, test_tui,
+             test_dry_run, test_destroy_yes, test_engine_daemon, test_tui,
              test_wizard_units, test_wizard_tui]
     for t in tests:
         try:
