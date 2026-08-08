@@ -371,9 +371,9 @@ async function loadVms() {
   $("vms-count").textContent = "";
   const tb = $("vms-table").querySelector("tbody");
   tb.innerHTML = `<tr><td colspan="7" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
-  let vms;
+  let vms, host;
   try {
-    vms = await api("/api/vms");
+    [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
   } catch (e) {
     tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
     return;
@@ -395,8 +395,12 @@ async function loadVms() {
   });
   $("inventory-templates").innerHTML = templates.map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>VMID ${v.vmid}</small></span><span class="badge template">template</span></button>`).join("") || `<span class="sub">No templates</span>`;
   $("inventory-templates").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
-  const storage = (meta && meta.storages) || [];
-  $("inventory-storage").innerHTML = storage.map(s => `<div class="inventory-row"><b>${esc(s)}</b><span>storage pool</span></div>`).join("") || `<span class="sub">No storage pools</span>`;
+  const storage = (host && host.storage) || [];
+  $("inventory-storage").innerHTML = storage.map(s => {
+    const total = Number(s.total || 0), used = Number(s.used || 0);
+    const capacity = total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable";
+    return `<div class="inventory-row"><span><b>${esc(s.storage || s.name || "—")}</b><small>${esc(s.type || "storage")} · ${esc(s.status || "unknown")}</small></span><span>${capacity}</span></div>`;
+  }).join("") || `<span class="sub">No storage pools</span>`;
 }
 
 function bytes(n) {
@@ -405,24 +409,29 @@ function bytes(n) {
   return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 function metric(label, value, note) {
-  return `<div class="metric"><span>${label}</span><strong>${value}</strong><small>${note || ""}</small></div>`;
+  return `<div class="metric"><span>${label}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ""}</div>`;
 }
 async function loadDashboard() {
   const [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
   if (!Array.isArray(vms)) return toast(vms.error || "Could not load overview", "err");
-  const active = vms.filter(v => v.status === "running").length;
+  const machines = vms.filter(v => !v.template);
+  const active = machines.filter(v => v.status === "running").length;
   const templates = vms.filter(v => v.template).length;
-  $("dashboard-metrics").innerHTML = metric("Machines", vms.length, `${active} running`) + metric("Running", active, `${vms.length - active} not running`) + metric("Templates", templates, "clone sources");
+  const allocatedCores = machines.reduce((n, v) => n + Number(v.cores || 0), 0);
+  const allocatedMemory = machines.reduce((n, v) => n + Number(v.memory || 0), 0) * 1024 * 1024;
+  $("dashboard-metrics").innerHTML = metric("Machines", machines.length, `${allocatedCores} vCPU allocated`) + metric("Running", active, "") + metric("Templates", templates, "") + metric("Allocated memory", bytes(allocatedMemory), "");
   $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
   $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
   const m = (host.status || {}).memory || {};
-  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><span>${bytes(m.used)} / ${bytes(m.total)} memory</span><span>load ${(host.status || {}).loadavg || "—"}</span>`;
+  const s = host.status || {}, load = Array.isArray(s.loadavg) ? s.loadavg[0] : s.loadavg;
+  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><span>${bytes(m.used)} / ${bytes(m.total)} memory</span><span>${s.cpuinfo && s.cpuinfo.cpus ? s.cpuinfo.cpus + " logical CPUs" : ""}${load != null ? ` · load ${Number(load).toFixed(2)}` : ""}</span>`;
 }
 async function loadHost() {
   const host = await api("/api/host");
   if (host.error) return toast(host.error, "err");
   const s = host.status || {}, m = s.memory || {};
-  $("host-metrics").innerHTML = metric("Node", host.node || "—", s.pveversion || "") + metric("Uptime", s.uptime ? Math.floor(s.uptime / 86400) + " days" : "—", "") + metric("Memory", bytes(m.used), "of " + bytes(m.total)) + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", "current use");
+  const root = s.rootfs || {}, load = Array.isArray(s.loadavg) ? s.loadavg[0] : s.loadavg;
+  $("host-metrics").innerHTML = metric("Node", host.node || "—", s.cpuinfo && s.cpuinfo.cpus ? s.cpuinfo.cpus + " logical CPUs" : "") + metric("Uptime", s.uptime ? Math.floor(s.uptime / 86400) + " days" : "—", "") + metric("Memory", bytes(m.used), m.total ? `${Math.round(100 * m.used / m.total)}% of ${bytes(m.total)}` : "") + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", load != null ? `load ${Number(load).toFixed(2)}` : "") + metric("Root filesystem", bytes(root.used), root.total ? `${Math.round(100 * root.used / root.total)}% of ${bytes(root.total)}` : "");
   $("host-storage").querySelector("tbody").innerHTML = (host.storage || []).map(x => `<tr><td>${esc(x.storage || x.name || "—")}</td><td>${esc(x.type || "—")}</td><td>${esc(x.status || "—")}</td><td>${bytes(x.used)}</td><td>${bytes(x.avail)}</td></tr>`).join("") || `<tr><td colspan="5" class="loadrow">No storage data.</td></tr>`;
 }
 async function loadSettings() {
@@ -457,13 +466,13 @@ function renderDetail(vm) {
   $("detail-status").textContent = vm.template ? "template" : vm.status;
   $("detail-ip").textContent = vm.ip ? "· " + vm.ip : "";
 
-  const disks = vm.disks.map(d => `${d.id} (${d.size || "?"}${d.storage ? " · " + d.storage : ""})`).join("<br>") || "—";
+  const disks = vm.disks.map(d => `${d.id} (${d.size || d.volume || "?"}${d.storage ? " · " + d.storage : ""})`).join("<br>") || "—";
   const body = $("detail-body");
   body.innerHTML = `
   <div class="grid2">
     <div class="card">
       <h3>Power</h3>
-      <div class="actions">
+      <div class="power-actions">
         <button class="btn" data-pw="start" ${vm.status === "running" ? "disabled" : ""}>▶ Start</button>
         <button class="btn ghost" data-pw="reboot" ${vm.status !== "running" ? "disabled" : ""}>↻ Reboot</button>
         <button class="btn ghost" data-pw="shutdown" ${vm.status !== "running" ? "disabled" : ""}>⏻ Shutdown</button>
@@ -501,21 +510,20 @@ function renderDetail(vm) {
 
   <div class="card">
     <h3>Disks</h3>
-    <table id="d-table"><thead><tr><th>ID</th><th>Size</th><th>Storage</th><th>Resize</th><th></th></tr></thead>
+    <table id="d-table" class="disk-table"><thead><tr><th>Device</th><th>Capacity</th><th>Storage</th><th>Volume</th><th></th></tr></thead>
       <tbody>
         ${vm.disks.map(d => `
         <tr>
-          <td>${d.id}</td>
-          <td>${d.size || "—"}</td><td>${d.storage || "—"}</td>
-          <td><input type="text" class="resize-in" data-id="${d.id}" placeholder="e.g. 100G" style="width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px"></td>
-          <td><button class="btn ghost mini" data-resize="${d.id}">Apply</button></td>
+          <td><b>${d.id}</b><small>${d.bus || d.id.replace(/\d+$/, "")}</small></td>
+          <td>${d.size || "—"}</td><td>${d.storage || "—"}</td><td class="disk-volume">${d.volume || "—"}</td>
+          <td class="disk-actions"><details><summary>Manage</summary><div class="disk-menu"><label>New size<input type="text" class="resize-in" data-id="${d.id}" placeholder="e.g. +20G"></label><button class="btn ghost mini" data-resize="${d.id}">Resize</button></div></details></td>
         </tr>`).join("")}
       </tbody>
     </table>
-    <div class="row disk-addrow" style="margin-top:10px">
-      <input type="text" id="d-new-id" placeholder="id (scsi1)" spellcheck="false">
-      <input type="text" id="d-new-size" placeholder="size (50G)" spellcheck="false">
-      <input type="text" id="d-new-storage" placeholder="storage (nas)" spellcheck="false">
+    <div class="disk-addrow detail-disk-add" style="margin-top:14px">
+      <div class="field"><label>Bus</label><select id="d-new-bus">${diskBusOptions()}</select></div>
+      <div class="field"><label>Capacity</label><input type="text" id="d-new-size" placeholder="50G" spellcheck="false"></div>
+      <div class="field"><label>Storage</label><select id="d-new-storage">${storageOptions()}</select></div>
       <button class="btn ghost" id="d-add">＋ Attach disk</button>
     </div>
   </div>
@@ -574,6 +582,19 @@ function renderDetail(vm) {
   loadSnapshots(vm.name);
 }
 function esc(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
+function diskBusOptions() {
+  return [["SCSI", "scsi"], ["SATA", "sata"], ["VirtIO", "virtio"], ["IDE", "ide"]]
+    .map(([label, value]) => `<option value="${value}">${label}</option>`).join("");
+}
+function storageOptions() {
+  const storages = (meta && meta.storages) || [];
+  return `<option value="">Select storage</option>` + storages.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
+}
+function nextDiskId(vm, bus) {
+  const used = new Set(vm.disks.map(d => d.id)); let n = 0;
+  while (used.has(bus + n)) n++;
+  return bus + n;
+}
 
 async function vmPower(name, action) {
   const r = await api("/api/vms/" + encodeURIComponent(name) + "/power", {
@@ -599,8 +620,9 @@ async function vmEdit(name) {
   pollTask(r.task, () => { toast("Saved", "ok"); openVm(name); });
 }
 async function vmDiskAdd(name) {
-  const body = { id: $("d-new-id").value.trim(), size: $("d-new-size").value.trim(), storage: $("d-new-storage").value.trim() };
-  if (!body.id || !body.size || !body.storage) return toast("id, size, storage required", "err");
+  const bus = $("d-new-bus").value;
+  const body = { id: nextDiskId(currentVm, bus), size: $("d-new-size").value.trim(), storage: $("d-new-storage").value.trim() };
+  if (!body.size || !body.storage) return toast("capacity and storage required", "err");
   const r = await api("/api/vms/" + encodeURIComponent(name) + "/disks/add", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });

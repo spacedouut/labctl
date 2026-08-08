@@ -62,7 +62,7 @@ h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; letter-spacing: .2px
 .metric { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; display:grid; gap:2px; }
 .metric span,.metric small { color:var(--muted); font-size:12px; }.metric strong { font:600 24px var(--mono); letter-spacing:-1px; }
 .compact-list { display:grid; }.compact-list button { display:flex; justify-content:space-between; align-items:center; border:0; border-bottom:1px solid var(--border); background:transparent; padding:10px 0; color:var(--text); text-align:left; cursor:pointer; }.compact-list small { display:block; color:var(--muted); font-size:11px; }.compact-list button:hover b { color:var(--accent); }
-.inventory-row { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid var(--border); }.inventory-row span { color:var(--muted); font-size:12px; }
+.inventory-row { display:flex; justify-content:space-between; align-items:center; gap:14px; padding:10px 0; border-bottom:1px solid var(--border); }.inventory-row b { color:var(--text); }.inventory-row small { display:block; color:var(--muted); font:11px var(--mono); margin-top:2px; }.inventory-row > span:last-child { color:var(--muted); font:12px var(--mono); text-align:right; white-space:nowrap; }
 .host-readout { display:grid; gap:10px; color:var(--muted); }.host-readout b { color:var(--text); font:600 15px var(--mono); }.capacity { height:7px; background:var(--surface-3); border-radius:99px; overflow:hidden; }.capacity span { display:block; height:100%; background:var(--accent); }
 .settings-card .field { flex:1; min-width:180px; }
 .create-nav { width:100%; margin-bottom:8px; text-align:center !important; }
@@ -104,16 +104,16 @@ h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; letter-spacing: .2px
 
 /* outlined inputs (label sits in the top border notch) */
 .field input[type=text], .field input[type=number], .field select,
-.disk-addrow input, .fw-row input, .fw-row select, .snap-row input {
+.disk-addrow input, .disk-addrow select, .fw-row input, .fw-row select, .snap-row input {
   font: inherit; padding: 9px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
   background: var(--surface-2); color: var(--text); min-width: 0; transition: border-color .15s, box-shadow .15s; }
-.field input:focus, .field select:focus, .disk-addrow input:focus,
+.field input:focus, .field select:focus, .disk-addrow input:focus, .disk-addrow select:focus,
 .fw-row input:focus, .snap-row input:focus {
   outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 /* error highlight on fields with validation errors */
 .field.bad input, .field.bad select, .field.bad textarea {
   border-color: var(--err); box-shadow: 0 0 0 3px var(--err-bg); }
-.field select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+.field select, .disk-addrow select { appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%),
                 linear-gradient(135deg, var(--muted) 50%, transparent 50%);
                 background-position: calc(100% - 16px) 50%, calc(100% - 11px) 50%;
                 background-size: 5px 5px; background-repeat: no-repeat; padding-right: 32px; }
@@ -164,6 +164,8 @@ button.btn.red:hover { filter: brightness(1.1); }
 button.btn:disabled { background: var(--surface-3); color: var(--faint); cursor: not-allowed; border-color: transparent; }
 button.btn:disabled:hover { filter: none; }
 .actions { display: flex; gap: 10px; margin-top: 16px; }
+.power-actions { display:grid; gap:8px; max-width:210px; }
+.power-actions .btn { text-align:left; }
 .mini { padding: 6px 12px; font-size: 12.5px; }
 .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid rgba(0,0,0,.25);
            border-top-color: currentColor; border-radius: 50%; animation: spin .8s linear infinite;
@@ -209,6 +211,20 @@ button.btn:disabled:hover { filter: none; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .disk-addrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
 .disk-addrow input { min-width: 100px; }
+.detail-disk-add { padding-top:2px; }
+.detail-disk-add .field { min-width:150px; flex:1; }
+.detail-disk-add .btn { align-self:end; }
+.disk-table td:first-child small { display:block; color:var(--muted); font:11px var(--mono); margin-top:2px; }
+.disk-volume { color:var(--muted); font:12px var(--mono); max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.disk-actions { width:112px; text-align:right; }
+.disk-actions details { position:relative; display:inline-block; text-align:left; }
+.disk-actions summary { list-style:none; cursor:pointer; color:var(--accent); font-size:12px; border:1px solid var(--accent); border-radius:var(--radius-sm); padding:5px 9px; }
+.disk-actions summary::-webkit-details-marker { display:none; }
+.disk-actions details[open] summary { background:var(--accent-soft); }
+.disk-menu { position:absolute; right:0; z-index:4; width:190px; margin-top:6px; padding:10px; border:1px solid var(--border-strong); border-radius:var(--radius-sm); background:var(--surface-3); box-shadow:var(--shadow); display:grid; gap:8px; }
+.disk-menu label { color:var(--muted); font-size:11px; display:grid; gap:4px; }
+.disk-menu input { width:100%; font:inherit; padding:7px 8px; color:var(--text); background:var(--surface-2); border:1px solid var(--border-strong); border-radius:var(--radius-sm); }
+.disk-menu .btn { width:100%; }
 .fw-row, .snap-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
 #fw-list { font-family: var(--mono); font-size: 11.5px; margin-top: 10px; max-height: 180px;
            overflow: auto; color: var(--muted); }

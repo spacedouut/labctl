@@ -218,11 +218,15 @@ def _vm_detail(cfg, qm, name: str) -> dict:
     disks = []
     for k, v in conf.items():
         if _DISK_RE.match(k):
-            parts = v.split(",")[0].split(":")
+            volume = v.split(",")[0]
+            parts = volume.split(":", 1)
+            size_match = __import__("re").search(r"(?:^|,)size=([^,]+)", v)
             disks.append({
                 "id": k,
-                "size": parts[-1] if len(parts) > 1 else "",
+                "bus": __import__("re").match(r"^[a-z]+", k).group(0),
+                "size": size_match.group(1) if size_match else "",
                 "storage": parts[0] if parts else "",
+                "volume": parts[1] if len(parts) > 1 else volume,
             })
     return {
         "vmid": vmid,
