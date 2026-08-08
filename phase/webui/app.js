@@ -31,7 +31,9 @@ async function api(path, opts) {
     opts.headers["X-Phase-Token"] = token;
     r = await fetch(path, opts);
   }
-  return r.json();
+  const body = await r.json();
+  if (!r.ok) throw new Error(body.error || `request failed (${r.status})`);
+  return body;
 }
 
 // ------------------------------------------------------------------------
@@ -76,6 +78,9 @@ function init() {
     buildStepper();
     renderAll();
     debouncedValidate();
+  }).catch(e => {
+    $("rail-plan").textContent = "Enter the access token to load this console.";
+    toast(e.message || "Could not load phase", "err", 6000);
   });
 }
 function fillSelect(sel, pairs) {
