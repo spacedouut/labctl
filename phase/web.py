@@ -41,6 +41,7 @@ Long operations run as async tasks; the page polls /api/task/<id>.
 from __future__ import annotations
 
 import base64
+import fcntl
 import hashlib
 import json
 import os
@@ -48,7 +49,9 @@ import pty as pty_mod
 import select
 import secrets
 import socket
+import struct
 import subprocess
+import termios
 import threading
 import time
 import uuid
@@ -416,6 +419,14 @@ def _ws_read_message(sock: socket.socket):
             payload += data
             if fin:
                 return opcode, payload
+
+
+def _set_winsize(fd: int, cols: int, rows: int) -> None:
+    """Set a PTY's visible dimensions, clamping untrusted browser input."""
+    cols = max(2, min(int(cols), 500))
+    rows = max(1, min(int(rows), 300))
+    fcntl.ioctl(fd, termios.TIOCSWINSZ,
+                struct.pack("HHHH", rows, cols, 0, 0))
 
 
 # ---------------------------------------------------------------------------
@@ -798,9 +809,20 @@ def make_handler(cfg, qm, token: str = ""):
             sock.settimeout(None)
 
             master, slave = pty_mod.openpty()
+            _set_winsize(master, 80, 24)
+
+            def setup_tty():
+                # Give the child a real controlling terminal. This makes
+                # ncurses, editors, and SSH receive SIGWINCH on resize.
+                os.setsid()
+                fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+
+            env = os.environ.copy()
+            env["TERM"] = "xterm-256color"
+            env.setdefault("COLORTERM", "truecolor")
             proc = subprocess.Popen(
                 argv, stdin=slave, stdout=slave, stderr=slave,
-                close_fds=True)
+                close_fds=True, preexec_fn=setup_tty, env=env)
             os.close(slave)
             dead = threading.Event()
 
@@ -832,7 +854,20 @@ def make_handler(cfg, qm, token: str = ""):
                         msg = _ws_read_message(sock)
                         if msg is None:
                             break
-                        _op, payload = msg
+                        op, payload = msg
+                        if op == 0x1:
+                            # Browser control messages use text frames; raw
+                            # terminal input is binary, so a pasted JSON
+                            # command can never be mistaken for a resize.
+                            try:
+                                control = json.loads(payload)
+                            except (UnicodeDecodeError, json.JSONDecodeError):
+                                control = None
+                            if (isinstance(control, dict) and
+                                    control.get("type") == "resize"):
+                                _set_winsize(master, control["cols"],
+                                             control["rows"])
+                                continue
                         try:
                             os.write(master, payload)
                         except OSError:
