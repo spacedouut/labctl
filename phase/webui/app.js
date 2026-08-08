@@ -74,7 +74,9 @@ function init() {
 }
 function fillSelect(sel, pairs) {
   sel.innerHTML = "";
-  for (const [label, value] of pairs) {
+  for (const item of pairs) {
+    // accept both [label, value] pairs and bare strings (os list)
+    const [label, value] = Array.isArray(item) ? item : [item, item];
     const o = document.createElement("option");
     o.textContent = label; o.value = value; sel.appendChild(o);
   }
