@@ -66,11 +66,14 @@ class PveApi:
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             return ctx
-        # pveproxy presents a cert signed by the PVE root CA
+        # pveproxy presents a cert signed by the PVE root CA. PVE's CA is
+        # legacy (no keyUsage ext) and Python 3.13+ strict mode rejects it —
+        # clear the strict flag, keep normal chain verification.
         ca = "/etc/pve/pve-root-ca.pem"
         if os.path.isfile(ca):
             try:
                 ctx.load_verify_locations(cafile=ca)
+                ctx.verify_flags &= ~ssl.VERIFY_X509_STRICT
             except ssl.SSLError:
                 pass
         return ctx
