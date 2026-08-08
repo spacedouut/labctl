@@ -876,6 +876,8 @@ def test_pve_api():
     check("pve pvesm", any(s["name"] == "local" for s in st))
     host = api.pvesh("/nodes/fake/status")
     check("pve pvesh", host.get("pveversion") == "fake 9.2.9")
+    content = api.pvesh("/nodes/fake/storage/local/content")
+    check("pve storage content", isinstance(content, list) and len(content) == 2)
 
     # clone + destroy (temp VM range)
     nid = api.nextid()
@@ -893,6 +895,10 @@ def test_pve_api():
                           daemon=True)
     t.start()
     _time.sleep(0.8)
+    base = f"http://127.0.0.1:{port}"
+    storage = _json.loads(_url.urlopen(base + "/api/storage/local").read())
+    check("web storage detail over api", storage["storage"]["storage"] == "local"
+          and len(storage["content"]) == 2)
     base = f"http://127.0.0.1:{port}"
     meta = _json.loads(_url.urlopen(base + "/api/meta").read())
     check("web meta over api", "small" in meta["sizes"]

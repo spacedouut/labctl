@@ -11,6 +11,7 @@ Endpoints (all /api/* require X-Phase-Token when a token is configured):
   GET  /static/<file>     -> vendored xterm.js etc.
   GET  /api/meta          -> sizes, templates, networks, keys, plans
   GET  /api/host          -> host health and storage summary
+  GET  /api/storage/<name> -> pool detail and stored volumes
   GET  /api/settings      -> editable, non-secret phase settings
   GET  /api/plans/<name>  -> full saved plan
   GET  /api/task/<id>     -> async task status (running|done|error)
@@ -139,6 +140,26 @@ def _host_detail(qm) -> dict:
         return {"node": node, "status": status, "storage": storage}
     except Exception as e:  # host telemetry should not break the console
         return {"node": "", "status": {}, "storage": [], "error": str(e)}
+
+
+def _storage_detail(qm, name: str) -> dict:
+    """Return one pool's capacity and content without exposing mutations."""
+    host = _host_detail(qm)
+    storage = next((s for s in host["storage"]
+                    if s.get("storage", s.get("name")) == name), None)
+    if not storage:
+        raise ValueError(f"storage pool not found: {name}")
+    try:
+        node = host["node"] or qm.node()
+        content = qm.pvesh(f"/nodes/{node}/storage/{name}/content") or []
+        if not isinstance(content, list):
+            content = []
+    except Exception as e:  # content permissions vary by backend/storage type
+        content, content_error = [], str(e)
+    else:
+        content_error = ""
+    return {"storage": storage, "content": content,
+            "content_error": content_error}
 
 
 _EDITABLE_SETTINGS = {
@@ -566,6 +587,12 @@ def make_handler(cfg, qm, token: str = ""):
                 return self._json(_cached_meta(cfg, qm))
             if path == "/api/host":
                 return self._json(_host_detail(qm))
+            if path.startswith("/api/storage/"):
+                name = path[len("/api/storage/"):]
+                try:
+                    return self._json(_storage_detail(qm, name))
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"error": str(e)}, 404)
             if path == "/api/settings":
                 return self._json(_public_settings(cfg))
             if path == "/api/vms":

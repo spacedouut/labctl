@@ -26,6 +26,7 @@
     <nav class="side-nav" aria-label="Console navigation">
       <button data-view="dashboard">Overview</button>
       <button data-view="vms">Inventory</button>
+      <button data-view="storage">Storage</button>
     </nav>
     <div class="side-bottom">
       <button class="btn create-nav" data-view="create">＋ Create VM</button>
@@ -186,6 +187,12 @@
       </table>
     </div>
     <div class="grid2"><div class="card"><h3>Templates</h3><div class="compact-list" id="inventory-templates"></div></div><div class="card"><h3>Storage</h3><div class="compact-list" id="inventory-storage"></div></div></div>
+  </main>
+
+  <!-- ================= STORAGE ================= -->
+  <main id="view-storage" class="hide">
+    <div class="page-title"><h2>Storage <span class="sub" id="storage-count"></span></h2><button class="btn ghost" id="btn-storage-refresh">↻ Refresh pools</button></div>
+    <div id="storage-body"></div>
   </main>
 
   <!-- ================= VM DETAIL ================= -->

@@ -157,6 +157,13 @@ class Handler(BaseHTTPRequestHandler):
                                              "type": "dir", "status": "available",
                                              "total": 10 ** 11, "used": 10 ** 9,
                                              "avail": 99 * 10 ** 9}]})
+            if path == "/api2/json/nodes/fake/storage/local/content":
+                return self._send({"data": [
+                    {"volid": "local:iso/ubuntu-26.iso", "content": "iso",
+                     "size": 2 * 1024 ** 3, "format": "iso"},
+                    {"volid": "local:100/vm-100-disk-0.qcow2", "content": "images",
+                     "size": 32 * 1024 ** 3, "vmid": 100, "format": "qcow2"},
+                ]})
             m = re.fullmatch(r"/api2/json/nodes/fake/qemu/(\d+)/config", path)
             if m:
                 conf = api_config(m.group(1))
