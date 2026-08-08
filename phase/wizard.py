@@ -46,6 +46,90 @@ except ImportError:
     class CreateWizardScreen:  # placeholder when the [tui] extra is missing
         def __init__(self, *a, **kw):
             raise MissingExtra("tui")
+
+    # Keep the pure wizard helpers available to the web UI and headless tests
+    # when the optional Textual dependency is not installed.
+    def plan_argv(state: dict, action: str) -> list[str]:
+        a = ["vm", action, "--name", state["name"], "--size", state["size"],
+             "--os", state["os"]]
+        for key, flag in (("cores", "--cores"), ("memory", "--memory")):
+            if state.get(key): a += [flag, str(state[key])]
+        if state.get("description"): a += ["--description", state["description"]]
+        if state.get("os_disk_size"):
+            spec = f"scsi0:os:{state['os']}:{state['os_disk_size']}"
+            if state.get("os_disk_storage"): spec += f":{state['os_disk_storage']}"
+            a += ["--disk", spec]
+        for d in state.get("data_disks", []):
+            spec = f"{d['id']}:data:{d.get('size', '')}"
+            if d.get("storage"): spec += f":{d['storage']}"
+            a += ["--disk", spec]
+        if state.get("bridge"): a += ["--bridge", state["bridge"]]
+        if state.get("vlan"): a += ["--vlan", state["vlan"]]
+        if state.get("ipmode") == "static" and state.get("ip"):
+            a += ["--ip", state["ip"]]
+            if state.get("gw"): a += ["--gw", state["gw"]]
+        elif state.get("ip"): a += ["--ip", "dhcp"]
+        if not state.get("onboot", True): a += ["--no-onboot"]
+        if state.get("protect"): a += ["--protect"]
+        for t in state.get("tags", []): a += ["--tag", t]
+        for k in state.get("ssh_keys", []): a += ["--ssh-key", k]
+        for flag in ("system", "docker", "tailscale"):
+            if state.get("bootstrap", {}).get(flag): a += [f"--{flag}"]
+        if state.get("gpu"): a += ["--gpu", state["gpu"]]
+        if action == "plan": a += ["--save"]
+        return a
+
+    _DISK_ID_RE = re.compile(r"^(scsi|sata|virtio|ide)\d+$")
+    _SIZE_RE = re.compile(r"^\d+(\.\d+)?[KMG]?$", re.IGNORECASE)
+
+    def _looks_like_ip(s: str) -> bool:
+        p = s.split(".")
+        return len(p) == 4 and all(x.isdigit() and 0 <= int(x) <= 255 for x in p)
+
+    def validate_step(state: dict, step: int, cfg=None) -> list[str]:
+        errors = []
+        if step == 1:
+            name = state.get("name", "")
+            if not name: errors.append("name is required")
+            else:
+                pattern = (cfg.get("naming.pattern") if cfg else None) or "^[a-z][a-z0-9-]*$"
+                max_len = (cfg.get("naming.max_length") if cfg else None) or 63
+                if not re.fullmatch(pattern, name): errors.append(f"name must match {pattern}")
+                elif len(name) > max_len: errors.append(f"name too long (max {max_len})")
+            for t in state.get("tags", []):
+                if not t or any(c.isspace() for c in t): errors.append(f"invalid tag: {t!r}")
+        elif step == 2:
+            if not state.get("size"): errors.append("pick a size")
+            for key in ("cores", "memory"):
+                v = state.get(key)
+                if v and (not str(v).isdigit() or int(v) <= 0): errors.append(f"{key} must be a positive integer")
+        elif step == 3:
+            for d in state.get("data_disks", []):
+                if not _DISK_ID_RE.match(d.get("id", "")): errors.append(f"bad disk id: {d.get('id')!r} (want scsiN|sataN|virtioN|ideN)")
+                if not _SIZE_RE.match(d.get("size", "")): errors.append(f"disk {d.get('id')}: bad size {d.get('size')!r} (e.g. 20G)")
+            if state.get("os_disk_size") and not _SIZE_RE.match(state["os_disk_size"]): errors.append(f"boot disk: bad size {state['os_disk_size']!r} (e.g. 20G)")
+        elif step == 4:
+            if state.get("vlan") and not state["vlan"].isdigit(): errors.append("vlan must be a number")
+            if state.get("ipmode") == "static":
+                if not state.get("ip"): errors.append("static IP required (or switch to DHCP)")
+                elif state["ip"].lower() == "dhcp": errors.append("'dhcp' is not a static IP")
+                if state.get("gw") and not _looks_like_ip(state["gw"]): errors.append(f"gateway doesn't look like an IP: {state['gw']!r}")
+        return errors
+
+    def summary_line(state: dict, sizes: dict) -> str:
+        size = state.get("size") or "?"
+        cores = state.get("cores") or sizes.get(size, {}).get("cores", "")
+        mem = state.get("memory") or sizes.get(size, {}).get("memory", "")
+        resource = f"{size} ({cores}c/{mem}MB)" if cores and mem else size
+        n = len(state.get("data_disks", [])) + 1
+        net = state.get("bridge") or "default"
+        if state.get("vlan"): net += f"/vlan{state['vlan']}"
+        ip = state.get("ip") if state.get("ipmode") == "static" else "dhcp"
+        bits = [state.get("name") or "(unnamed)", resource, state.get("os") or "os?",
+                f"{n} disk{'s' if n != 1 else ''}", net, ip]
+        bs = [k for k in ("system", "docker", "tailscale") if state.get("bootstrap", {}).get(k)]
+        if bs: bits.append("+".join(bs))
+        return " · ".join(bits)
 else:
 
     STEP_NAMES = ["Basics", "Resources", "Disks", "Network", "Bootstrap", "Review"]

@@ -251,7 +251,7 @@ def print_plan(cfg, qm, plan: dict, out=None) -> None:
         f"  Name:      {plan['name']}",
         f"  Size:      {size_label}",
         f"  OS:        {plan['os']}",
-        f"  Boot disk: {os_disk.get('id', 'scsi0')} ({os_disk.get('size') or 'template default'}"
+        f"  Template disk: {os_disk.get('id', 'scsi0')} ({os_disk.get('size') or 'template default'}"
         + (f" on {os_disk['storage']}" if os_disk.get("storage") else "") + ")",
     ]
     for d in data_disks:
@@ -303,7 +303,7 @@ def realize_plan(cfg, qm, plan: dict, dry_run: bool = False, out=None) -> int:
         else:
             getattr(qm, "_run")(cmd)
 
-    # 1. clone (boot disk lands on requested storage when given)
+    # 1. clone (the template disk lands on requested storage when given)
     clone_args = [str(template), str(vmid), "--name", name, "--full", "1"]
     if os_disk.get("storage"):
         clone_args += ["--storage", os_disk["storage"]]
@@ -382,9 +382,6 @@ def realize_plan(cfg, qm, plan: dict, dry_run: bool = False, out=None) -> int:
             from . import engine as engine_mod
             pci = engine_mod.gpu_pci_for(cfg, qm, plan["gpu"])
             step(["set", str(vmid), "--hostpci0", f"{pci},mdev={plan['gpu']}"], quiet=True)
-
-    # 10. boot order → the os disk
-    step(["set", str(vmid), "--boot", f"order={os_disk['id']}"], quiet=True)
 
     # stamp back into saved plan
     path = os.path.join(plan_dir(), f"{name}.json")

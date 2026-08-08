@@ -9,20 +9,31 @@
 <link rel="stylesheet" href="/static/xterm.css">
 </head>
 <body>
-<header>
-  <h1>phase <span style="color:var(--muted);font-weight:400">· VM console</span></h1>
-  <span class="host" id="hostline"></span>
-  <nav class="tabs">
-    <button id="tab-create" class="active">Create VM</button>
-    <button id="tab-vms">VMs</button>
-  </nav>
-  <span class="spacer"></span>
-  <label style="color:var(--muted);font-size:13px">Load plan
-    <select id="loadplan" style="margin-left:8px"></select>
-  </label>
-  <button class="btn ghost" id="btn-refresh">↻</button>
-</header>
+<div id="app-shell">
+  <aside id="sidebar">
+    <a class="brand" href="#dashboard"><span class="brand-mark">P</span><span>phase</span></a>
+    <div class="node-pill"><span class="live"></span><span id="hostline">connecting…</span></div>
+    <nav class="side-nav" aria-label="Console navigation">
+      <button data-view="dashboard">Overview</button>
+      <button data-view="vms">Virtual machines</button>
+      <button data-view="create" class="active">Create VM</button>
+      <button data-view="host">Host</button>
+    </nav>
+    <div class="side-bottom">
+      <button data-view="settings">Settings</button>
+      <button class="nav-refresh" id="btn-refresh">↻ Refresh data</button>
+    </div>
+  </aside>
+  <section id="workspace">
+    <header id="topbar"><div id="crumb">CREATE / NEW INSTANCE</div><span class="spacer"></span><label id="plan-loader">Load draft <select id="loadplan"></select></label></header>
 <div id="wrap">
+
+  <!-- ================= OVERVIEW ================= -->
+  <main id="view-dashboard" class="hide">
+    <div class="page-title"><div><span class="eyebrow">CONTROL PLANE</span><h2>Overview</h2><p>What needs your attention right now.</p></div><button class="btn" data-view="create">＋ New VM</button></div>
+    <div class="metric-grid" id="dashboard-metrics"></div>
+    <div class="grid2"><div class="card"><h3>Recent machines</h3><div id="dashboard-vms" class="compact-list"></div></div><div class="card"><h3>Host capacity</h3><div id="dashboard-host" class="host-readout">loading…</div></div></div>
+  </main>
 
   <!-- ================= CREATE ================= -->
   <main id="view-create">
@@ -60,11 +71,11 @@
 
     <div id="pane-disks" class="pane hide">
       <h2>Disks</h2>
-      <div class="sub">One list — mark a disk as boot.</div>
+      <div class="sub">The template supplies the system disk. Add any extra data disks here.</div>
       <div class="card">
-        <h3>Disks</h3>
+        <h3>Additional disks</h3>
         <table id="disk-table">
-          <thead><tr><th></th><th>ID</th><th>Size</th><th>Storage</th><th></th></tr></thead>
+          <thead><tr><th>ID</th><th>Size</th><th>Storage</th><th></th></tr></thead>
           <tbody></tbody>
         </table>
         <div class="row disk-addrow">
@@ -73,7 +84,7 @@
           <input type="text" id="disk-new-storage" placeholder="storage (nas)" spellcheck="false">
           <button class="btn ghost" id="disk-add">＋ Add disk</button>
         </div>
-        <div class="hint">Click a radio to make that disk the boot disk.</div>
+        <div class="hint">Disk order stays in Proxmox’s hands; phase never overrides it.</div>
       </div>
     </div>
 
@@ -149,7 +160,7 @@
 
   <!-- ================= VMS LIST ================= -->
   <main id="view-vms" class="hide">
-    <h2>VMs <span class="sub" id="vms-count"></span></h2>
+    <div class="page-title"><div><span class="eyebrow">INVENTORY</span><h2>Virtual machines <span class="sub" id="vms-count"></span></h2><p>Operate the fleet without leaving this page.</p></div><button class="btn" data-view="create">＋ New VM</button></div>
     <div class="card">
       <table id="vms-table">
         <thead><tr><th>Name</th><th>VMID</th><th>Status</th><th>IP</th>
@@ -167,18 +178,33 @@
       <span class="sub" id="detail-ip"></span>
       <span class="spacer"></span>
       <button class="btn" id="btn-ssh">⌨ SSH</button>
+      <button class="btn ghost" id="btn-serial">▣ Serial</button>
       <button class="btn ghost" id="btn-back">← VMs</button>
     </div>
     <div id="detail-body"></div>
   </main>
+
+  <!-- ================= HOST ================= -->
+  <main id="view-host" class="hide">
+    <div class="page-title"><div><span class="eyebrow">NODE</span><h2>Host</h2><p>Read the node; open a console when you actually need to intervene.</p></div><button class="btn" id="btn-host-console">⌨ Host console</button></div>
+    <div class="metric-grid" id="host-metrics"></div>
+    <div class="card"><h3>Storage</h3><table id="host-storage"><thead><tr><th>Pool</th><th>Type</th><th>Status</th><th>Used</th><th>Available</th></tr></thead><tbody></tbody></table></div>
+  </main>
+
+  <!-- ================= SETTINGS ================= -->
+  <main id="view-settings" class="hide">
+    <div class="page-title"><div><span class="eyebrow">PHASE CONFIGURATION</span><h2>Settings</h2><p>These values write to the active <code>phase.json</code>. Credentials remain server-side.</p></div></div>
+    <div class="card settings-card"><h3>VM defaults</h3><div class="row"><div class="field"><label>Default SSH user</label><input id="s-default-user" spellcheck="false"></div><div class="field"><label>Default bridge</label><input id="s-default-bridge" spellcheck="false"></div><div class="field"><label>Default storage</label><input id="s-default-storage" spellcheck="false"></div><div class="field"><label>Backup storage</label><input id="s-backup-storage" spellcheck="false"></div></div><label class="toggle"><input type="checkbox" id="s-vm-agent"> Enable QEMU guest agent on created VMs</label><div class="actions"><button class="btn" id="save-settings">Save settings</button></div></div>
+  </main>
 </div>
+</div></section></div>
 
 <div id="toast"></div>
 
 <!-- terminal modal -->
 <div id="term-modal" class="hide">
   <div id="term-box">
-    <div id="term-head">terminal <span id="term-title"></span>
+    <div id="term-head"><span><span class="dot"></span><span id="term-kind">terminal</span> <span id="term-title"></span></span>
       <button id="term-close">✕</button></div>
     <div id="term"></div>
   </div>

@@ -10,6 +10,8 @@ Endpoints (all /api/* require X-Phase-Token when a token is configured):
   GET  /app.js /app.css   -> assets
   GET  /static/<file>     -> vendored xterm.js etc.
   GET  /api/meta          -> sizes, templates, networks, keys, plans
+  GET  /api/host          -> host health and storage summary
+  GET  /api/settings      -> editable, non-secret phase settings
   GET  /api/plans/<name>  -> full saved plan
   GET  /api/task/<id>     -> async task status (running|done|error)
   GET  /api/vms           -> VM list
@@ -28,7 +30,10 @@ Endpoints (all /api/* require X-Phase-Token when a token is configured):
   POST /api/vms/<name>/snapshot    {name}
   POST /api/vms/<name>/backup
   POST /api/vms/<name>/destroy
-  GET  /api/ssh/<name>[?token=..]  -> WebSocket terminal (upgrade)
+  POST /api/settings      -> persist editable phase settings
+  GET  /api/ssh/<name>[?token=..]  -> WebSocket SSH terminal (upgrade)
+  GET  /api/serial/<name>[?token=..] -> WebSocket VM serial console
+  GET  /api/host/terminal[?token=..] -> WebSocket host shell
 
 Long operations run as async tasks; the page polls /api/task/<id>.
 """
@@ -101,6 +106,53 @@ def _meta(cfg, qm) -> dict:
     }
 
 
+def _host_detail(qm) -> dict:
+    """Small, safe host summary.  PVE API and CLI backends share pvesh."""
+    try:
+        node = qm.node() if hasattr(qm, "node") else os.uname().nodename
+        status = qm.pvesh(f"/nodes/{node}/status") or {}
+        storage = qm.pvesh(f"/nodes/{node}/storage") or []
+        return {"node": node, "status": status, "storage": storage}
+    except Exception as e:  # host telemetry should not break the console
+        return {"node": "", "status": {}, "storage": [], "error": str(e)}
+
+
+_EDITABLE_SETTINGS = {
+    "default_user": "default_user",
+    "default_bridge": "default_bridge",
+    "default_storage": "default_storage",
+    "vm_agent": "vm.agent",
+    "backup_storage": "backup.storage",
+}
+
+
+def _public_settings(cfg) -> dict:
+    """Never send credentials or web tokens to the browser."""
+    return {key: _dget(cfg, dotted, "") for key, dotted in _EDITABLE_SETTINGS.items()}
+
+
+def _save_settings(cfg, updates: dict) -> dict:
+    if not isinstance(updates, dict):
+        raise ValueError("settings must be an object")
+    for key, value in updates.items():
+        dotted = _EDITABLE_SETTINGS.get(key)
+        if not dotted:
+            continue
+        if key == "vm_agent":
+            value = bool(value)
+        elif not isinstance(value, str):
+            raise ValueError(f"{key} must be text")
+        node = cfg.data
+        bits = dotted.split(".")
+        for bit in bits[:-1]:
+            node = node.setdefault(bit, {})
+            if not isinstance(node, dict):
+                raise ValueError(f"cannot update {key}: invalid config shape")
+        node[bits[-1]] = value.strip() if isinstance(value, str) else value
+    cfg.save()
+    return _public_settings(cfg)
+
+
 # ---- read caches (qm subprocess calls cost ~0.5s each on PVE) ------------
 # meta and the VM list are read-only aggregates; serve them from a short TTL
 # cache so page loads don't stall on 6-10s of sequential qm calls. Every
@@ -170,7 +222,6 @@ def _vm_detail(cfg, qm, name: str) -> dict:
                 "id": k,
                 "size": parts[-1] if len(parts) > 1 else "",
                 "storage": parts[0] if parts else "",
-                "os": k == "scsi0",
             })
     return {
         "vmid": vmid,
@@ -393,10 +444,20 @@ def make_handler(cfg, qm, token: str = ""):
                 return self._file(rel,
                                   "text/javascript; charset=utf-8"
                                   if rel.endswith(".js") else "text/css")
-            if not self._authed():
+            ws_path = (path == "/api/host/terminal" or
+                       path.startswith("/api/serial/") or
+                       path.startswith("/api/ssh/"))
+            # Browser WebSockets cannot set X-Phase-Token; terminals carry
+            # the token in their upgrade query instead.  Keep every other
+            # API route header-gated.
+            if not self._authed() and not (ws_path and self._ws_token_ok(query)):
                 return self._json({"error": "unauthorized"}, 401)
             if path == "/api/meta":
                 return self._json(_cached_meta(cfg, qm))
+            if path == "/api/host":
+                return self._json(_host_detail(qm))
+            if path == "/api/settings":
+                return self._json(_public_settings(cfg))
             if path == "/api/vms":
                 return self._json(_cached_vms(qm, cfg))
             if path.startswith("/api/vms/") and path.endswith("/snapshots"):
@@ -428,6 +489,18 @@ def make_handler(cfg, qm, token: str = ""):
             if path.startswith("/api/task/"):
                 tid = path[len("/api/task/"):]
                 return self._json(_TASKS.get(tid, {"status": "unknown"}))
+            if path == "/api/host/terminal":
+                if not self._ws_token_ok(query):
+                    return self._json({"error": "unauthorized"}, 401)
+                return self._ws_terminal(argv=[os.environ.get("SHELL", "/bin/bash"), "-l"])
+            if path.startswith("/api/serial/"):
+                name = path[len("/api/serial/"):]
+                if not self._ws_token_ok(query):
+                    return self._json({"error": "unauthorized"}, 401)
+                try:
+                    return self._ws_terminal(argv=["qm", "terminal", str(find_vmid(qm, name)), "-escape", "none"])
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"error": str(e)}, 400)
             if path.startswith("/api/ssh/"):
                 name = path[len("/api/ssh/"):]
                 if not self._ws_token_ok(query):
@@ -474,6 +547,13 @@ def make_handler(cfg, qm, token: str = ""):
                 _cache_drop()
                 return self._task_json(provision_plan, cfg, qm,
                                        state_to_plan(state, cfg))
+            if path == "/api/settings":
+                try:
+                    result = _save_settings(cfg, self._read_body().get("settings", {}))
+                    _cache_drop()
+                    return self._json({"ok": True, "settings": result})
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"ok": False, "error": str(e)}, 400)
 
             if path.startswith("/api/vms/") and path.endswith("/power"):
                 name = path[len("/api/vms/"):-len("/power")]
@@ -558,7 +638,7 @@ def make_handler(cfg, qm, token: str = ""):
             except json.JSONDecodeError:
                 return {}
 
-        def _ws_terminal(self, name: str):
+        def _ws_terminal(self, name: str | None = None, argv: list[str] | None = None):
             """WebSocket terminal: upgrade, spawn ssh (or test cmd), bridge."""
             key = self.headers.get("Sec-WebSocket-Key")
             if not key:
@@ -568,11 +648,14 @@ def make_handler(cfg, qm, token: str = ""):
                 if test_cmd:
                     argv = [test_cmd]
                     keyfile = None
-                else:
+                elif argv is None:
+                    assert name is not None
                     user, ip, vmid = vm_ssh_user_ip(qm, cfg, name)
                     argv, keyfile = ssh_argv(cfg, qm, user, ip, vmid,
                                              quiet=True)
                     argv = ["ssh", "-tt"] + argv
+                else:
+                    keyfile = None
             except Exception as e:  # noqa: BLE001
                 return self._json({"error": str(e)}, 400)
 

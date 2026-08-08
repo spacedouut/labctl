@@ -303,6 +303,9 @@ def test_web_api():
 
     tmp = fresh_tmp()
     os.environ.update({k: v for k, v in _env(tmp).items()})
+    web_config = os.path.join(tmp, "phase.json")
+    shutil.copy2(FIXTURE_CONFIG, web_config)
+    os.environ["PHASE_CONFIG"] = web_config
     os.environ["PHASE_WEB_TEST_SSH_CMD"] = "cat"
     cfg = Config.load()
     qm = Qm(make_transport(None))
@@ -366,7 +369,13 @@ def test_web_api():
     check("web vms list", any(v["name"] == "webvm1" for v in vms))
     detail = get("/api/vms/webvm1")
     check("web vm detail", detail["cores"] == "2" and len(detail["disks"]) == 2)
-    check("web vm detail boot disk", detail["disks"][0]["os"] is True)
+    check("web vm detail does not invent boot disk", "os" not in detail["disks"][0])
+    host = get("/api/host")
+    check("web host summary", "status" in host and "storage" in host)
+    settings = get("/api/settings")
+    check("web public settings", settings["default_user"] == "ubuntu" and "pve" not in settings)
+    saved = post("/api/settings", {"settings": {"default_user": "ubuntu", "vm_agent": True}})
+    check("web settings save", saved["ok"] and saved["settings"]["default_user"] == "ubuntu")
 
     tr = wait_task(post("/api/vms/webvm1/power", {"action": "stop"})["task"])
     check("web power stop", tr["status"] == "done")
@@ -441,6 +450,12 @@ def test_web_api():
     req = _url.Request(base2 + "/api/meta",
                        headers={"X-Phase-Token": "sekrit"})
     check("web token accepts valid", _json.loads(_url.urlopen(req).read())["oses"])
+    try:
+        _url.urlopen(base2 + "/api/ssh/wsvm?token=sekrit")
+    except _urlerr.HTTPError as e:
+        check("web ws token query reaches upgrade handler", e.code == 400)
+    else:
+        check("web ws token query reaches upgrade handler", False)
     shutil.rmtree(tmp)
 
 

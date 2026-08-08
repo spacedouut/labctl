@@ -6,11 +6,11 @@ let token = localStorage.getItem(TOKEN_KEY) || "";
 let meta = null;
 let currentVm = null;
 
-// ---- create-wizard state (unified disks: one list, one marked boot) ----
+// ---- create-wizard state (the template owns its system disk) ------------
 let state = {
   name: "", description: "", tags: [], onboot: true, protect: false,
   size: "", cores: "", memory: "", gpu: "", os: "",
-  disks: [{ id: "scsi0", size: "", storage: "", boot: true }],
+  disks: [],
   bridge: "", vlan: "", ipmode: "dhcp", ip: "", gw: "",
   bootstrap: { system: false, docker: false, tailscale: false },
   ssh_keys: [],
@@ -35,7 +35,7 @@ async function api(path, opts) {
 }
 
 // ------------------------------------------------------------------------
-// toast / tabs
+// toast / workspace navigation
 
 function toast(msg, cls, ms) {
   const t = $("toast");
@@ -45,9 +45,15 @@ function toast(msg, cls, ms) {
   toast._t = setTimeout(() => t.className = "", ms || 3500);
 }
 function showTab(tab) {
-  ["create", "vms", "detail"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
-  ["create", "vms"].forEach(t => $("tab-" + t).classList.toggle("active", t === tab));
+  ["dashboard", "create", "vms", "detail", "host", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
+  const navTab = tab === "detail" ? "vms" : tab;
+  document.querySelectorAll(".side-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
+  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE / NEW INSTANCE", vms:"INVENTORY / VIRTUAL MACHINES", detail:"INVENTORY / VM DETAIL", host:"NODE / HOST", settings:"PHASE / SETTINGS"})[tab] || "PHASE";
+  $("plan-loader").classList.toggle("hide", tab !== "create");
   if (tab === "vms") loadVms();
+  if (tab === "dashboard") loadDashboard();
+  if (tab === "host") loadHost();
+  if (tab === "settings") loadSettings();
 }
 
 // ------------------------------------------------------------------------
@@ -124,7 +130,6 @@ function highlightErrors(all) {
     ["name is required", "f-name"], ["name must match", "f-name"], ["name too long", "f-name"],
     ["pick a size", "size-chips"],
     ["cores must be", "f-cores"], ["memory must be", "f-memory"],
-    ["boot disk: bad size", "f-osdisk-size"],
     ["vlan must be", "f-vlan"],
     ["static IP required", "f-ip"], ["is not a static IP", "f-ip"],
     ["gateway doesn't look like an IP", "f-gw"],
@@ -161,10 +166,7 @@ function buildCommand(st) {
   if (st.cores) a.push("--cores", st.cores);
   if (st.memory) a.push("--memory", st.memory);
   a.push("--os", st.os);
-  const boot = st.disks.find(d => d.boot) || st.disks[0];
-  if (boot.size) a.push("--disk", `scsi0:os:${st.os}:${boot.size}`
-    + (boot.storage ? `:${boot.storage}` : ""));
-  st.disks.filter(d => d !== boot).forEach(d =>
+  st.disks.forEach(d =>
     a.push("--disk", `${d.id}:data:${d.size}` + (d.storage ? `:${d.storage}` : "")));
   if (st.bridge) a.push("--bridge", st.bridge);
   if (st.vlan) a.push("--vlan", st.vlan);
@@ -175,26 +177,16 @@ function buildCommand(st) {
   return a.join(" ");
 }
 
-// --- unified disks ------------------------------------------------------
+// --- additional data disks ---------------------------------------------
 function renderDisks() {
   const tb = $("disk-table").querySelector("tbody");
   tb.innerHTML = "";
   state.disks.forEach((d, i) => {
     const tr = document.createElement("tr");
-    const boot = d.boot ? "checked" : "";
-    tr.innerHTML = `<td><input type="radio" name="bootdisk" ${boot}></td>
-      <td>${d.id}</td><td>${d.size || "—"}</td><td>${d.storage || "—"}</td>
+    tr.innerHTML = `<td>${d.id}</td><td>${d.size || "—"}</td><td>${d.storage || "—"}</td>
       <td class="del" title="remove">✕</td>`;
-    tr.querySelector("input").addEventListener("change", () => {
-      state.disks.forEach(x => x.boot = false);
-      state.disks[i].boot = true;
-      renderDisks();
-      debouncedValidate();
-    });
     tr.querySelector(".del").addEventListener("click", () => {
-      if (state.disks.length === 1) { toast("need at least one disk", "err"); return; }
       state.disks.splice(i, 1);
-      if (!state.disks.some(x => x.boot)) state.disks[0].boot = true;
       renderDisks();
       debouncedValidate();
     });
@@ -206,21 +198,20 @@ function addDisk() {
   const size = $("disk-new-size").value.trim();
   const storage = $("disk-new-storage").value.trim();
   if (!id || !size) { toast("id and size required", "err"); return; }
-  state.disks.push({ id, size, storage, boot: false });
+  state.disks.push({ id, size, storage });
   $("disk-new-id").value = $("disk-new-size").value = $("disk-new-storage").value = "";
   renderDisks();
   debouncedValidate();
 }
 function toBackend(st) {
-  // unified disks -> wizard state schema (os_disk_* + data_disks)
-  const boot = st.disks.find(d => d.boot) || st.disks[0];
+  // phase's plan schema still identifies the template disk internally;
+  // there is deliberately no user-facing boot-disk choice or boot order.
   return {
     name: st.name, description: st.description, tags: st.tags,
     onboot: st.onboot, protect: st.protect, size: st.size,
     cores: st.cores, memory: st.memory, gpu: st.gpu, os: st.os,
-    os_disk_size: boot.size, os_disk_storage: boot.storage,
-    data_disks: st.disks.filter(d => d !== boot)
-      .map(d => ({ id: d.id, size: d.size, storage: d.storage })),
+    os_disk_size: "", os_disk_storage: "",
+    data_disks: st.disks.map(d => ({ id: d.id, size: d.size, storage: d.storage })),
     bridge: st.bridge, vlan: st.vlan, ipmode: st.ipmode, ip: st.ip, gw: st.gw,
     bootstrap: st.bootstrap, ssh_keys: st.ssh_keys,
   };
@@ -332,17 +323,13 @@ async function pollTask(tid, done) {
 async function loadPlan(name) {
   const plan = await api("/api/plans/" + encodeURIComponent(name));
   if (!plan || plan.error) return;
-  const osDisk = (plan.disks || []).find(d => d.role === "os") || {};
   state = {
     name: plan.name || "", description: plan.description || "",
     tags: plan.tags || [], onboot: plan.onboot !== false, protect: !!plan.protection,
     size: plan.size || "", cores: plan.cores || "", memory: plan.memory || "",
     gpu: plan.gpu || "", os: plan.os || "",
-    disks: [
-      { id: osDisk.id || "scsi0", size: osDisk.size || "", storage: osDisk.storage || "", boot: true },
-      ...(plan.disks || []).filter(d => d.role !== "os")
-        .map(d => ({ id: d.id, size: d.size || "", storage: d.storage || "", boot: false })),
-    ],
+    disks: (plan.disks || []).filter(d => d.role !== "os")
+      .map(d => ({ id: d.id, size: d.size || "", storage: d.storage || "" })),
     bridge: (plan.net || {}).bridge || "", vlan: (plan.net || {}).vlan || "",
     ipmode: plan.ipconfig && plan.ipconfig !== "dhcp" ? "static" : "dhcp",
     ip: plan.ipconfig && plan.ipconfig !== "dhcp" ? plan.ipconfig : "",
@@ -385,6 +372,48 @@ async function loadVms() {
   });
 }
 
+function bytes(n) {
+  n = Number(n || 0); const units = ["B", "KB", "MB", "GB", "TB"]; let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n.toFixed(i ? 1 : 0)} ${units[i]}`;
+}
+function metric(label, value, note) {
+  return `<div class="metric"><span>${label}</span><strong>${value}</strong><small>${note || ""}</small></div>`;
+}
+async function loadDashboard() {
+  const [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
+  if (!Array.isArray(vms)) return toast(vms.error || "Could not load overview", "err");
+  const active = vms.filter(v => v.status === "running").length;
+  const templates = vms.filter(v => v.template).length;
+  $("dashboard-metrics").innerHTML = metric("Machines", vms.length, `${active} running`) + metric("Running", active, `${vms.length - active} not running`) + metric("Templates", templates, "clone sources");
+  $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
+  $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
+  const m = (host.status || {}).memory || {};
+  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><span>${bytes(m.used)} / ${bytes(m.total)} memory</span><span>load ${(host.status || {}).loadavg || "—"}</span>`;
+}
+async function loadHost() {
+  const host = await api("/api/host");
+  if (host.error) return toast(host.error, "err");
+  const s = host.status || {}, m = s.memory || {};
+  $("host-metrics").innerHTML = metric("Node", host.node || "—", s.pveversion || "") + metric("Uptime", s.uptime ? Math.floor(s.uptime / 86400) + " days" : "—", "") + metric("Memory", bytes(m.used), "of " + bytes(m.total)) + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", "current use");
+  $("host-storage").querySelector("tbody").innerHTML = (host.storage || []).map(x => `<tr><td>${esc(x.storage || x.name || "—")}</td><td>${esc(x.type || "—")}</td><td>${esc(x.status || "—")}</td><td>${bytes(x.used)}</td><td>${bytes(x.avail)}</td></tr>`).join("") || `<tr><td colspan="5" class="loadrow">No storage data.</td></tr>`;
+}
+async function loadSettings() {
+  const s = await api("/api/settings");
+  if (s.error) return toast(s.error, "err");
+  $("s-default-user").value = s.default_user || "";
+  $("s-default-bridge").value = s.default_bridge || "";
+  $("s-default-storage").value = s.default_storage || "";
+  $("s-backup-storage").value = s.backup_storage || "";
+  $("s-vm-agent").checked = s.vm_agent !== false;
+}
+async function saveSettings() {
+  const settings = {default_user: $("s-default-user").value.trim(), default_bridge: $("s-default-bridge").value.trim(), default_storage: $("s-default-storage").value.trim(), backup_storage: $("s-backup-storage").value.trim(), vm_agent: $("s-vm-agent").checked};
+  const r = await api("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({settings})});
+  if (r.error) return toast(r.error, "err");
+  toast("Settings saved to phase.json", "ok"); init();
+}
+
 // ------------------------------------------------------------------------
 // VM detail
 
@@ -401,7 +430,7 @@ function renderDetail(vm) {
   $("detail-status").textContent = vm.template ? "template" : vm.status;
   $("detail-ip").textContent = vm.ip ? "· " + vm.ip : "";
 
-  const disks = vm.disks.map(d => `${d.id} (${d.size || "?"}${d.os ? " · boot" : ""}${d.storage ? " · " + d.storage : ""})`).join("<br>") || "—";
+  const disks = vm.disks.map(d => `${d.id} (${d.size || "?"}${d.storage ? " · " + d.storage : ""})`).join("<br>") || "—";
   const body = $("detail-body");
   body.innerHTML = `
   <div class="grid2">
@@ -449,7 +478,7 @@ function renderDetail(vm) {
       <tbody>
         ${vm.disks.map(d => `
         <tr>
-          <td>${d.id}${d.os ? ' <span class="badge template">boot</span>' : ""}</td>
+          <td>${d.id}</td>
           <td>${d.size || "—"}</td><td>${d.storage || "—"}</td>
           <td><input type="text" class="resize-in" data-id="${d.id}" placeholder="e.g. 100G" style="width:90px;padding:5px 8px;border:1px solid var(--border);border-radius:6px"></td>
           <td><button class="btn ghost mini" data-resize="${d.id}">Apply</button></td>
@@ -511,6 +540,7 @@ function renderDetail(vm) {
   $("b-backup").addEventListener("click", () => vmBackup(vm.name));
   $("b-destroy").addEventListener("click", () => vmDestroy(vm.name));
   $("btn-ssh").onclick = () => openTerminal(vm.name);
+  $("btn-serial").onclick = () => openTerminalPath("serial", vm.name, "SERIAL");
   $("btn-ssh").disabled = vm.status !== "running";
   $("btn-ssh").title = vm.status === "running" ? "Open SSH terminal" : "VM must be running";
   loadFirewall(vm.name);
@@ -611,7 +641,11 @@ async function vmDestroy(name) {
 
 let term = null, termFit = null, termWs = null;
 function openTerminal(name) {
+  openTerminalPath("ssh", name, "SSH");
+}
+function openTerminalPath(kind, name, label) {
   $("term-modal").classList.remove("hide");
+  $("term-kind").textContent = label || "terminal";
   $("term-title").textContent = name + " · connecting…";
   if (term) { term.dispose(); term = null; }
   const el = $("term");
@@ -628,7 +662,8 @@ function openTerminal(name) {
   term.focus();
   term.onData(d => { if (termWs && termWs.readyState === 1) termWs.send(d); });
   const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  termWs = new WebSocket(proto + "//" + location.host + "/api/ssh/" + encodeURIComponent(name) + (token ? "?token=" + encodeURIComponent(token) : ""));
+  const endpoint = kind === "host" ? "/api/host/terminal" : "/api/" + kind + "/" + encodeURIComponent(name);
+  termWs = new WebSocket(proto + "//" + location.host + endpoint + (token ? "?token=" + encodeURIComponent(token) : ""));
   termWs.onopen = () => {
     $("term-title").textContent = name + " · connected (exit with logout/exit)";
     term.focus();
@@ -653,11 +688,14 @@ function closeTerminal() {
 document.querySelectorAll("input[name=ipmode]").forEach(r =>
   r.addEventListener("change", () => { updateStaticVisibility(); debouncedValidate(); }));
 $("disk-add").addEventListener("click", addDisk);
-$("tab-create").addEventListener("click", () => showTab("create"));
-$("tab-vms").addEventListener("click", () => showTab("vms"));
+document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => showTab(b.dataset.view)));
 $("btn-back").addEventListener("click", () => showTab("vms"));
+$("btn-host-console").addEventListener("click", () => openTerminalPath("host", "host", "HOST CONSOLE"));
+$("save-settings").addEventListener("click", saveSettings);
 $("btn-refresh").addEventListener("click", () => {
   if ($("view-vms").classList.contains("hide") === false) loadVms();
+  else if ($("view-dashboard").classList.contains("hide") === false) loadDashboard();
+  else if ($("view-host").classList.contains("hide") === false) loadHost();
   else if (currentVm) openVm(currentVm.name);
 });
 $("loadplan").addEventListener("change", e => e.target.value && loadPlan(e.target.value));
@@ -666,7 +704,7 @@ $("act-provision").addEventListener("click", () => runCreateAction("provision"))
 $("act-save").addEventListener("click", () => runCreateAction("save"));
 $("term-close").addEventListener("click", closeTerminal);
 ["f-name","f-desc","f-cores","f-memory","f-vlan","f-ip","f-gw","f-tags",
- "f-gpu","f-os","f-bridge","f-sshkey","f-osdisk-size","f-osdisk-storage"]
+ "f-gpu","f-os","f-bridge","f-sshkey"]
   .forEach(id => $(id) && $(id).addEventListener("input", debouncedValidate));
 ["f-onboot","f-protect","f-bs-system","f-bs-docker","f-bs-tailscale"]
   .forEach(id => $(id) && $(id).addEventListener("change", debouncedValidate));
