@@ -124,6 +124,8 @@ class Handler(BaseHTTPRequestHandler):
             return {}
         raw = self.rfile.read(n).decode()
         try:
+            if (self.headers.get("Content-Type") or "").startswith("application/json"):
+                return json.loads(raw)
             return dict(parse_qsl(raw))
         except Exception:  # noqa: BLE001
             return {}
@@ -258,7 +260,9 @@ class Handler(BaseHTTPRequestHandler):
             m = re.fullmatch(r"/api2/json/nodes/fake/qemu/(\d+)/agent/exec", path)
             if m:
                 vmid = m.group(1)
-                cmd = json.loads(body.get("command", "[]"))
+                cmd = body.get("command", [])
+                if isinstance(cmd, str):
+                    cmd = json.loads(cmd or "[]")
                 if cmd and cmd[0] == "network-get-interfaces":
                     ip = f"10.10.1.{int(vmid) - 100}"
                     out = json.dumps([

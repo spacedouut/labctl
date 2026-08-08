@@ -79,14 +79,18 @@ class PveApi:
         return ctx
 
     def _req(self, method: str, path: str, body: dict | None = None,
-             timeout: float | None = None) -> dict:
+             timeout: float | None = None, json_body: bool = False) -> dict:
         """One API call; returns the decoded `data` envelope."""
         url = self.base.rstrip("/") + path
         data = None
         headers = {"Authorization": f"PVEAPIToken={self.token}"}
         if body:
-            data = urllib.parse.urlencode(body).encode()
-            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            if json_body:
+                data = json.dumps(body).encode()
+                headers["Content-Type"] = "application/json"
+            else:
+                data = urllib.parse.urlencode(body).encode()
+                headers["Content-Type"] = "application/x-www-form-urlencoded"
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=timeout or self.timeout,
@@ -216,11 +220,15 @@ class PveApi:
 
     def _agent_exec(self, vmid: int, command: list[str],
                     timeout: int = 0, input_data: str | None = None) -> dict:
-        body = {"command": json.dumps(command)}
+        # agent/exec takes a JSON array for `command`; PVE's form parser
+        # (incl. the new pve-api-daemon) mangles bracket-encoded arrays, so
+        # send a JSON body here specifically.
+        body = {"command": command}
         if input_data is not None:
             body["input-data"] = input_data
         resp = self._req("POST",
-                         f"/nodes/{self.node()}/qemu/{vmid}/agent/exec", body)
+                         f"/nodes/{self.node()}/qemu/{vmid}/agent/exec",
+                         body, json_body=True)
         if resp.get("exited"):
             return resp
         pid = resp.get("pid")
