@@ -9,6 +9,16 @@
 <link rel="stylesheet" href="/static/xterm.css">
 </head>
 <body>
+<section id="login-screen" class="hide" aria-labelledby="login-title">
+  <form id="login-form" class="login-card">
+    <div class="login-mark">P</div>
+    <div><p class="eyebrow">PHASE CONSOLE</p><h1 id="login-title">Sign in</h1><p id="login-copy">Use your Proxmox PAM account.</p></div>
+    <label>Username<input id="login-user" autocomplete="username" placeholder="name@pam" required></label>
+    <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" class="login-error" role="alert"></p>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+</section>
 <div id="app-shell">
   <aside id="sidebar">
     <a class="brand" href="#dashboard"><span class="brand-mark">P</span><span>phase</span></a>
@@ -196,7 +206,7 @@
   <main id="view-settings" class="hide">
     <div class="page-title"><h2>Settings</h2></div>
     <div class="card settings-card"><h3>VM defaults</h3><div class="row"><div class="field"><label>Default SSH user</label><input id="s-default-user" spellcheck="false"></div><div class="field"><label>Default bridge</label><input id="s-default-bridge" spellcheck="false"></div><div class="field"><label>Default storage</label><input id="s-default-storage" spellcheck="false"></div><div class="field"><label>Backup storage</label><input id="s-backup-storage" spellcheck="false"></div></div><label class="toggle"><input type="checkbox" id="s-vm-agent"> Enable QEMU guest agent on created VMs</label><div class="actions"><button class="btn" id="save-settings">Save settings</button></div></div>
-    <div class="card settings-card"><h3>Console access</h3><p class="sub">Phase uses an access token; it does not have a separate web password.</p><div class="actions"><button class="btn ghost" id="reset-token">Rotate access token</button><button class="btn ghost" id="forget-token">Forget this browser’s token</button></div></div>
+    <div class="card settings-card"><h3>Console access</h3><p class="sub" id="auth-summary"></p><div class="actions"><button class="btn ghost" id="reset-token">Rotate access token</button><button class="btn ghost" id="forget-token">Forget this browser’s token</button><button class="btn ghost hide" id="logout">Sign out</button></div></div>
   </main>
 </div>
 </div></section></div>

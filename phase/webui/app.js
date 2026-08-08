@@ -3,6 +3,7 @@ const $ = id => document.getElementById(id);
 const SECTIONS = ["machine", "disks", "network", "others"];
 const TOKEN_KEY = "phase_token";
 let token = localStorage.getItem(TOKEN_KEY) || "";
+let auth = {mode: "token", authenticated: false, user: null};
 let meta = null;
 let currentVm = null;
 
@@ -26,7 +27,7 @@ async function api(path, opts) {
   opts.headers = Object.assign({}, opts.headers);
   if (token) opts.headers["X-Phase-Token"] = token;
   let r = await fetch(path, opts);
-  if (r.status === 401) {
+  if (r.status === 401 && auth.mode === "token") {
     token = prompt("Access token for this phase instance:") || "";
     if (token) localStorage.setItem(TOKEN_KEY, token);
     opts.headers["X-Phase-Token"] = token;
@@ -35,6 +36,34 @@ async function api(path, opts) {
   const body = await r.json();
   if (!r.ok) throw new Error(body.error || `request failed (${r.status})`);
   return body;
+}
+
+async function boot() {
+  const r = await fetch("/api/auth/session", {cache:"no-store"});
+  auth = await r.json();
+  if (auth.mode === "pam" && !auth.authenticated) {
+    $("app-shell").classList.add("hide");
+    $("login-screen").classList.remove("hide");
+    $("login-user").focus();
+    return;
+  }
+  $("login-screen").classList.add("hide");
+  $("app-shell").classList.remove("hide");
+  init();
+}
+async function login(e) {
+  e.preventDefault();
+  const error = $("login-error"); error.textContent = "";
+  const submit = $("login-form").querySelector("button"); submit.disabled = true;
+  try {
+    const r = await fetch("/api/auth/login", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({username:$("login-user").value.trim(), password:$("login-password").value})});
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.error || "Sign-in failed");
+    $("login-password").value = "";
+    auth = {mode:"pam", authenticated:true, user:body.user};
+    $("login-screen").classList.add("hide"); $("app-shell").classList.remove("hide"); init();
+  } catch (err) { error.textContent = err.message; }
+  finally { submit.disabled = false; }
 }
 
 // ------------------------------------------------------------------------
@@ -444,6 +473,11 @@ async function loadSettings() {
   $("s-default-storage").value = s.default_storage || "";
   $("s-backup-storage").value = s.backup_storage || "";
   $("s-vm-agent").checked = s.vm_agent !== false;
+  const pam = auth.mode === "pam";
+  $("auth-summary").textContent = pam ? `Signed in as ${auth.user}. Phase access is granted to the configured PAM users.` : "Phase uses an access token; it does not have a separate web password.";
+  $("reset-token").classList.toggle("hide", pam);
+  $("forget-token").classList.toggle("hide", pam);
+  $("logout").classList.toggle("hide", !pam);
 }
 async function saveSettings() {
   const settings = {default_user: $("s-default-user").value.trim(), default_bridge: $("s-default-bridge").value.trim(), default_storage: $("s-default-storage").value.trim(), backup_storage: $("s-backup-storage").value.trim(), vm_agent: $("s-vm-agent").checked};
@@ -726,6 +760,8 @@ $("act-provision").addEventListener("click", () => runCreateAction("provision"))
 $("act-save").addEventListener("click", () => runCreateAction("save"));
 $("reset-token").addEventListener("click", rotateToken);
 $("forget-token").addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); token = ""; toast("Token forgotten on this browser", "ok"); });
+$("login-form").addEventListener("submit", login);
+$("logout").addEventListener("click", async () => { await fetch("/api/auth/logout", {method:"POST"}); auth.authenticated=false; boot(); });
 ["f-name","f-desc","f-cores","f-memory","f-vlan","f-ip","f-gw","f-tags",
  "f-gpu","f-os","f-bridge","f-sshkey"]
   .forEach(id => $(id) && $(id).addEventListener("input", debouncedValidate));
@@ -744,4 +780,4 @@ SECTIONS.forEach(s => {
   });
 });
 
-init();
+boot();

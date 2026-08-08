@@ -25,6 +25,39 @@ from .util import PhaseError, quoted
 DEFAULT_URL = "https://localhost:8006/api2/json"
 
 
+def pam_login(username: str, password: str, url: str | None = None,
+              verify_tls: bool | None = None, timeout: float = 10.0) -> str:
+    """Verify a PVE PAM password and return the authenticated userid.
+
+    Phase deliberately does not retain PVE's ticket: the ticket only proves
+    the password at login time, while Phase keeps its own short-lived,
+    HttpOnly web session.  This avoids copying a PVE root ticket into every
+    browser request and keeps the service API token private.
+    """
+    base = url or os.environ.get("PVE_API_URL") or DEFAULT_URL
+    if verify_tls is None:
+        verify_tls = os.environ.get("PVE_VERIFY_TLS", "1").lower() not in ("0", "false", "no")
+    ctx = PveApi("", url=base, verify_tls=verify_tls, timeout=timeout)._ctx
+    body = urllib.parse.urlencode({"username": username, "password": password}).encode()
+    req = urllib.request.Request(
+        base.rstrip("/") + "/access/ticket", data=body,
+        headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            envelope = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise PhaseError("invalid username or password")
+        raise PhaseError(f"PVE login failed: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        raise PhaseError(f"PVE login failed: {e.reason}")
+    data = envelope.get("data") if isinstance(envelope, dict) else None
+    userid = data.get("username") if isinstance(data, dict) else None
+    if not userid:
+        raise PhaseError("PVE login returned no user")
+    return str(userid)
+
+
 def _human(n: int) -> str:
     """Bytes → the same human units pvesm shows (e.g. '32.55 GiB')."""
     try:

@@ -56,6 +56,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
 from .log import append_event
+from .pveapi import pam_login
 from .plan import list_plans, read_plan, realize_plan, save_plan
 from .provision import provision_plan
 from .util import die, log
@@ -66,6 +67,9 @@ from .inline_wizard import _dget, _summary_lines, _wizard_state, state_to_plan
 
 WEBUI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "webui")
 _TASKS: dict[str, dict] = {}
+_SESSIONS: dict[str, dict] = {}
+_SESSION_LOCK = threading.Lock()
+_SESSION_TTL = 12 * 60 * 60
 
 # For tests: override what the ssh terminal spawns (e.g. "cat").
 # Read at request time so tests can set it after import.
@@ -176,6 +180,25 @@ def _save_settings(cfg, updates: dict) -> dict:
     if new_token:
         out["new_token"] = new_token  # returned once, only to an authenticated caller
     return out
+
+
+def _web_auth_config(cfg, token: str) -> tuple[str, set[str], int]:
+    """Return auth mode, allowed users and session lifetime.
+
+    PAM mode is opt-in and deny-by-default: an empty `web.pam_users` list
+    cannot accidentally turn every privileged PVE PAM account into a Phase
+    administrator.
+    """
+    mode = str(_dget(cfg, "web.auth") or ("token" if token else "none")).lower()
+    if mode not in {"none", "token", "pam"}:
+        raise ValueError("web.auth must be one of: none, token, pam")
+    users = {str(u) for u in (_dget(cfg, "web.pam_users") or [])}
+    ttl_hours = _dget(cfg, "web.session_ttl_hours", 12)
+    try:
+        ttl = max(1, min(int(ttl_hours), 168)) * 60 * 60
+    except (TypeError, ValueError):
+        ttl = _SESSION_TTL
+    return mode, users, ttl
 
 
 # ---- read caches (qm subprocess calls cost ~0.5s each on PVE) ------------
@@ -399,27 +422,63 @@ def _ws_read_message(sock: socket.socket):
 
 def make_handler(cfg, qm, token: str = ""):
     token_box = {"value": token}
+    auth_mode, pam_users, session_ttl = _web_auth_config(cfg, token)
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         # ---- helpers ----------------------------------------------------
 
+        def _session(self) -> dict | None:
+            """Return a live Phase session, expiring it on read."""
+            cookie = self.headers.get("Cookie", "")
+            sid = next((p.strip()[14:] for p in cookie.split(";")
+                        if p.strip().startswith("phase_session=")), "")
+            if not sid:
+                return None
+            with _SESSION_LOCK:
+                session = _SESSIONS.get(sid)
+                if not session or session["expires"] <= time.time():
+                    _SESSIONS.pop(sid, None)
+                    return None
+                return session
+
         def _authed(self) -> bool:
-            if not token_box["value"]:
+            if auth_mode == "none":
                 return True
+            if auth_mode == "pam":
+                return self._session() is not None
             return self.headers.get("X-Phase-Token") == token_box["value"]
 
         def _ws_token_ok(self, query: str) -> bool:
-            if not token_box["value"]:
+            if auth_mode == "none":
                 return True
+            if auth_mode == "pam":
+                return self._session() is not None
             return parse_qs(query).get("token", [""])[0] == token_box["value"]
 
-        def _json(self, obj, code=200):
+        def _auth_state(self) -> dict:
+            session = self._session()
+            return {"mode": auth_mode, "authenticated": bool(self._authed()),
+                    "user": session.get("user") if session else None,
+                    "users": sorted(pam_users) if auth_mode == "pam" else []}
+
+        def _set_session_cookie(self, sid: str):
+            # Caddy terminates TLS and sends X-Forwarded-Proto. Keep local
+            # `phase web` usable over http while making public cookies Secure.
+            secure = self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+            cookie = f"phase_session={sid}; Path=/; HttpOnly; SameSite=Strict"
+            if secure:
+                cookie += "; Secure"
+            self.send_header("Set-Cookie", cookie)
+
+        def _json(self, obj, code=200, session_cookie: str = ""):
             body = json.dumps(obj).encode()
             self.send_response(code)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            if session_cookie:
+                self._set_session_cookie(session_cookie)
             self.end_headers()
             self.wfile.write(body)
 
@@ -480,6 +539,8 @@ def make_handler(cfg, qm, token: str = ""):
                 return self._file(rel,
                                   "text/javascript; charset=utf-8"
                                   if rel.endswith(".js") else "text/css")
+            if path == "/api/auth/session":
+                return self._json(self._auth_state())
             ws_path = (path == "/api/host/terminal" or
                        path.startswith("/api/serial/") or
                        path.startswith("/api/ssh/"))
@@ -548,6 +609,34 @@ def make_handler(cfg, qm, token: str = ""):
 
         def do_POST(self):
             path = unquote(self.path.split("?")[0])
+            if path == "/api/auth/login":
+                if auth_mode != "pam":
+                    return self._json({"error": "PAM login is not enabled"}, 404)
+                body = self._read_body() or {}
+                username, password = body.get("username", ""), body.get("password", "")
+                if not isinstance(username, str) or not isinstance(password, str):
+                    return self._json({"error": "username and password are required"}, 400)
+                username = username.strip()
+                if not username.endswith("@pam") or username not in pam_users:
+                    return self._json({"error": "this PAM user is not allowed in Phase"}, 403)
+                try:
+                    user = pam_login(username, password, url=_dget(cfg, "pve.api_url") or None,
+                                     verify_tls=_dget(cfg, "pve.verify_tls", True))
+                except Exception as e:  # noqa: BLE001
+                    return self._json({"error": str(e)}, 401)
+                sid = secrets.token_urlsafe(32)
+                with _SESSION_LOCK:
+                    _SESSIONS[sid] = {"user": user, "expires": time.time() + session_ttl}
+                append_event(action="web_login", actor=user)
+                return self._json({"ok": True, "user": user,
+                                   "expires_in": session_ttl}, session_cookie=sid)
+            if path == "/api/auth/logout":
+                cookie = self.headers.get("Cookie", "")
+                sid = next((p.strip()[14:] for p in cookie.split(";")
+                            if p.strip().startswith("phase_session=")), "")
+                with _SESSION_LOCK:
+                    _SESSIONS.pop(sid, None)
+                return self._json({"ok": True})
             if not self._authed():
                 return self._json({"error": "unauthorized"}, 401)
             if path == "/api/plan":

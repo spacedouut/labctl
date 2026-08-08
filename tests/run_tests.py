@@ -460,6 +460,30 @@ def test_web_api():
         check("web ws token query reaches upgrade handler", e.code == 400)
     else:
         check("web ws token query reaches upgrade handler", False)
+
+    # PAM mode uses an HttpOnly server-side session, never a browser token.
+    # Stub only the PVE password check; transport/session behavior is real.
+    import http.cookiejar as _cookiejar
+    import phase.web as _web
+    original_login = _web.pam_login
+    _web.pam_login = lambda user, password, **kw: user if password == "good" else (_ for _ in ()).throw(Exception("invalid username or password"))
+    cfg.data["web"] = {"auth": "pam", "pam_users": ["operator@pam"], "session_ttl_hours": 1}
+    port3 = 8933
+    _threading.Thread(target=run, args=(cfg, qm), kwargs={"listen": "127.0.0.1", "port": port3}, daemon=True).start()
+    _time.sleep(0.5)
+    base3 = f"http://127.0.0.1:{port3}"
+    try:
+        _url.urlopen(base3 + "/api/meta").read()
+        check("web PAM rejects anonymous", False)
+    except _urlerr.HTTPError as e:
+        check("web PAM rejects anonymous", e.code == 401)
+    jar = _cookiejar.CookieJar()
+    opener = _url.build_opener(_url.HTTPCookieProcessor(jar))
+    login_req = _url.Request(base3 + "/api/auth/login", data=_json.dumps({"username": "operator@pam", "password": "good"}).encode(), headers={"Content-Type": "application/json"})
+    login = _json.loads(opener.open(login_req).read())
+    check("web PAM login sets session", login["user"] == "operator@pam" and bool(jar))
+    check("web PAM session permits API", _json.loads(opener.open(base3 + "/api/meta").read())["oses"])
+    _web.pam_login = original_login
     shutil.rmtree(tmp)
 
 
