@@ -192,6 +192,8 @@ def _web_auth_config(cfg, token: str) -> tuple[str, set[str], int]:
     mode = str(_dget(cfg, "web.auth") or ("token" if token else "none")).lower()
     if mode not in {"none", "token", "pam"}:
         raise ValueError("web.auth must be one of: none, token, pam")
+    if mode == "token" and not token:
+        raise ValueError("web.auth=token requires web.token (or --token)")
     users = {str(u) for u in (_dget(cfg, "web.pam_users") or [])}
     ttl_hours = _dget(cfg, "web.session_ttl_hours", 12)
     try:
