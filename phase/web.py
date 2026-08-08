@@ -46,6 +46,7 @@ import json
 import os
 import pty as pty_mod
 import select
+import secrets
 import socket
 import subprocess
 import threading
@@ -59,7 +60,7 @@ from .plan import list_plans, read_plan, realize_plan, save_plan
 from .provision import provision_plan
 from .util import die, log
 from .vm import (all_vms, best_guest_ip, find_vmid, list_template_oses,
-                 next_vmid, ssh_argv, vm_ssh_user_ip)
+                 next_vmid, ssh_argv, system_disk, vm_ssh_user_ip)
 from .wizard import validate_step
 from .inline_wizard import _dget, _summary_lines, _wizard_state, state_to_plan
 
@@ -95,6 +96,20 @@ def _start_task(fn, *args, **kw) -> str:
 
 
 def _meta(cfg, qm) -> dict:
+    images = []
+    for os_name in list_template_oses(cfg, qm):
+        if os_name == "none":
+            continue
+        try:
+            vmid = find_vmid(qm, f"{_dget(cfg, 'templates.prefix', 'tpl')}{_dget(cfg, 'templates.separator', '-')}{os_name}")
+            conf = qm.config(vmid)
+            disks = [k for k in conf if _DISK_RE.match(k)]
+            # One system image per OS.  Config only needs an override for an
+            # unusually-laid-out template; ordinary templates use first disk.
+            disk = _dget(cfg, f"templates.system_disks.{os_name}") or (sorted(disks)[0] if disks else "scsi0")
+            images.append({"os": os_name, "template": vmid, "disk": disk})
+        except Exception:
+            continue
     return {
         "host": os.uname().nodename,
         "sizes": _dget(cfg, "templates.sizes") or {},
@@ -104,6 +119,7 @@ def _meta(cfg, qm) -> dict:
         "storages": [s.get("name") for s in qm.pvesm() if s.get("name")],
         "plans": list_plans(),
         "next_vmid": next_vmid(qm),
+        "system_images": images,
     }
 
 
@@ -135,7 +151,12 @@ def _public_settings(cfg) -> dict:
 def _save_settings(cfg, updates: dict) -> dict:
     if not isinstance(updates, dict):
         raise ValueError("settings must be an object")
+    new_token = ""
     for key, value in updates.items():
+        if key == "rotate_token" and value:
+            new_token = secrets.token_urlsafe(24)
+            cfg.data.setdefault("web", {})["token"] = new_token
+            continue
         dotted = _EDITABLE_SETTINGS.get(key)
         if not dotted:
             continue
@@ -151,7 +172,10 @@ def _save_settings(cfg, updates: dict) -> dict:
                 raise ValueError(f"cannot update {key}: invalid config shape")
         node[bits[-1]] = value.strip() if isinstance(value, str) else value
     cfg.save()
-    return _public_settings(cfg)
+    out = _public_settings(cfg)
+    if new_token:
+        out["new_token"] = new_token  # returned once, only to an authenticated caller
+    return out
 
 
 # ---- read caches (qm subprocess calls cost ~0.5s each on PVE) ------------
@@ -215,6 +239,8 @@ def _vm_detail(cfg, qm, name: str) -> dict:
     vmid = find_vmid(qm, name)
     conf = qm.config(vmid)
     status = qm.status(vmid)
+    provenance = system_disk(vmid)
+    system_disk_id = provenance.get("disk", "")
     disks = []
     for k, v in conf.items():
         if _DISK_RE.match(k):
@@ -227,6 +253,8 @@ def _vm_detail(cfg, qm, name: str) -> dict:
                 "size": size_match.group(1) if size_match else "",
                 "storage": parts[0] if parts else "",
                 "volume": parts[1] if len(parts) > 1 else volume,
+                "role": "system" if k == system_disk_id else "data",
+                "image": provenance.get("image", "") if k == system_disk_id else "",
             })
     return {
         "vmid": vmid,
@@ -370,20 +398,21 @@ def _ws_read_message(sock: socket.socket):
 
 
 def make_handler(cfg, qm, token: str = ""):
+    token_box = {"value": token}
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
         # ---- helpers ----------------------------------------------------
 
         def _authed(self) -> bool:
-            if not token:
+            if not token_box["value"]:
                 return True
-            return self.headers.get("X-Phase-Token") == token
+            return self.headers.get("X-Phase-Token") == token_box["value"]
 
         def _ws_token_ok(self, query: str) -> bool:
-            if not token:
+            if not token_box["value"]:
                 return True
-            return parse_qs(query).get("token", [""])[0] == token
+            return parse_qs(query).get("token", [""])[0] == token_box["value"]
 
         def _json(self, obj, code=200):
             body = json.dumps(obj).encode()
@@ -438,6 +467,8 @@ def make_handler(cfg, qm, token: str = ""):
             query = raw.split("?", 1)[1] if "?" in raw else ""
             if path == "/":
                 return self._file("index.html", "text/html; charset=utf-8")
+            if path == "/terminal.html":
+                return self._file("terminal.html", "text/html; charset=utf-8")
             if path == "/app.js":
                 return self._file("app.js", "text/javascript; charset=utf-8")
             if path == "/app.css":
@@ -555,6 +586,8 @@ def make_handler(cfg, qm, token: str = ""):
             if path == "/api/settings":
                 try:
                     result = _save_settings(cfg, self._read_body().get("settings", {}))
+                    if result.get("new_token"):
+                        token_box["value"] = result["new_token"]
                     _cache_drop()
                     return self._json({"ok": True, "settings": result})
                 except Exception as e:  # noqa: BLE001

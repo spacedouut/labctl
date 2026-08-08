@@ -16,7 +16,6 @@
     <nav class="side-nav" aria-label="Console navigation">
       <button data-view="dashboard">Overview</button>
       <button data-view="vms">Inventory</button>
-      <button data-view="host">Host</button>
     </nav>
     <div class="side-bottom">
       <button class="btn create-nav" data-view="create">＋ Create VM</button>
@@ -30,9 +29,10 @@
 
   <!-- ================= OVERVIEW ================= -->
   <main id="view-dashboard">
-    <div class="page-title"><h2>Overview</h2><button class="btn" data-view="create">＋ Create VM</button></div>
+    <div class="page-title"><h2>Overview</h2><span><button class="btn ghost" id="btn-host-console">⌨ Host console</button> <button class="btn" data-view="create">＋ Create VM</button></span></div>
     <div class="metric-grid" id="dashboard-metrics"></div>
-    <div class="grid2"><div class="card"><h3>Recent machines</h3><div id="dashboard-vms" class="compact-list"></div></div><div class="card"><h3>Host capacity</h3><div id="dashboard-host" class="host-readout">loading…</div></div></div>
+    <div class="grid2"><div class="card"><h3>Machines</h3><div id="dashboard-vms" class="compact-list"></div></div><div class="card"><h3>Host utilization</h3><div id="dashboard-host" class="host-readout">loading…</div></div></div>
+    <div class="card"><h3>Storage</h3><div id="dashboard-storage" class="storage-bars"></div></div>
   </main>
 
   <!-- ================= CREATE ================= -->
@@ -63,8 +63,8 @@
         </div>
       </div>
       <div class="card">
-        <h3>Operating system</h3>
-        <div class="field"><label>Template</label><select id="f-os"></select></div>
+        <h3>System image</h3>
+        <div class="field"><label>Image</label><select id="f-os"></select></div>
       </div>
     </div>
 
@@ -192,31 +192,16 @@
     <div id="detail-body"></div>
   </main>
 
-  <!-- ================= HOST ================= -->
-  <main id="view-host" class="hide">
-    <div class="page-title"><h2>Host</h2><button class="btn" id="btn-host-console">⌨ Host console</button></div>
-    <div class="metric-grid" id="host-metrics"></div>
-    <div class="card"><h3>Storage</h3><table id="host-storage"><thead><tr><th>Pool</th><th>Type</th><th>Status</th><th>Used</th><th>Available</th></tr></thead><tbody></tbody></table></div>
-  </main>
-
   <!-- ================= SETTINGS ================= -->
   <main id="view-settings" class="hide">
     <div class="page-title"><h2>Settings</h2></div>
     <div class="card settings-card"><h3>VM defaults</h3><div class="row"><div class="field"><label>Default SSH user</label><input id="s-default-user" spellcheck="false"></div><div class="field"><label>Default bridge</label><input id="s-default-bridge" spellcheck="false"></div><div class="field"><label>Default storage</label><input id="s-default-storage" spellcheck="false"></div><div class="field"><label>Backup storage</label><input id="s-backup-storage" spellcheck="false"></div></div><label class="toggle"><input type="checkbox" id="s-vm-agent"> Enable QEMU guest agent on created VMs</label><div class="actions"><button class="btn" id="save-settings">Save settings</button></div></div>
+    <div class="card settings-card"><h3>Console access</h3><p class="sub">Phase uses an access token; it does not have a separate web password.</p><div class="actions"><button class="btn ghost" id="reset-token">Rotate access token</button><button class="btn ghost" id="forget-token">Forget this browser’s token</button></div></div>
   </main>
 </div>
 </div></section></div>
 
 <div id="toast"></div>
-
-<!-- terminal modal -->
-<div id="term-modal" class="hide">
-  <div id="term-box">
-    <div id="term-head"><span><span class="dot"></span><span id="term-kind">terminal</span> <span id="term-title"></span></span>
-      <button id="term-close">✕</button></div>
-    <div id="term"></div>
-  </div>
-</div>
 
 <script src="/static/xterm.js"></script>
 <script src="/static/xterm-addon-fit.js"></script>

@@ -138,7 +138,7 @@ def state_to_plan(state: dict, cfg) -> dict:
     cores = state["cores"] or preset_c
     memory = state["memory"] or preset_m
     disks = [{
-        "id": "scsi0", "role": "os", "os": state["os"],
+        "id": state.get("system_disk_id") or "scsi0", "role": "os", "os": state["os"],
         "size": state.get("os_disk_size") or "", "storage": state.get("os_disk_storage") or "",
     }]
     for d in state.get("data_disks", []):

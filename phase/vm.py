@@ -6,9 +6,11 @@ import glob
 import os
 import re
 import tempfile
+import json
 from urllib.parse import unquote
 
 from .util import PhaseError, ip_in_cidr, to_bytes, validate_name
+from .config import state_dir
 
 
 # ---- lookup ----------------------------------------------------------------
@@ -281,6 +283,37 @@ def next_free_disk_id(qm, vmid: int, bus: str = "scsi") -> str:
     while f"{bus}{i}" in used:
         i += 1
     return f"{bus}{i}"
+
+
+# Phase-level disk provenance.  Proxmox deliberately has no concept of an
+# "OS disk" beyond boot order, which Phase does not manage.  Keep the useful
+# provenance in its own state file instead of inventing a PVE config option.
+def _system_disk_state_path() -> str:
+    return os.path.join(state_dir(), "system-disks.json")
+
+
+def set_system_disk(vmid: int, disk: str, image: str) -> None:
+    path = _system_disk_state_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    try:
+        with open(path) as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    data[str(vmid)] = {"disk": disk, "image": image}
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp, path)
+
+
+def system_disk(vmid: int) -> dict:
+    try:
+        with open(_system_disk_state_path()) as f:
+            return json.load(f).get(str(vmid), {})
+    except (OSError, ValueError):
+        return {}
 
 
 # ---- aggregate -------------------------------------------------------------

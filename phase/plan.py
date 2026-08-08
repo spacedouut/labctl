@@ -24,7 +24,8 @@ from .qm import Qm
 from .util import (PhaseError, die, have_tty, log, parse_disk_spec, quoted,
                    to_bytes, validate_name)
 from .vm import (best_guest_ip, build_sshkeys_file, disk_size_bytes,
-                 find_vmid, next_vmid, resolve_size, resolve_template)
+                 find_vmid, next_vmid, resolve_size, resolve_template,
+                 set_system_disk)
 
 # ---------------------------------------------------------------------------
 # flag parsing
@@ -414,6 +415,7 @@ def realize_plan(cfg, qm, plan: dict, dry_run: bool = False, out=None) -> int:
             f.write("\n")
 
     if not dry_run:
+        set_system_disk(vmid, os_disk["id"], plan["os"])
         append_event(event="vm.created", vmid=vmid, name=name)
     return vmid
 

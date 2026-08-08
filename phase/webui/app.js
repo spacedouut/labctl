@@ -48,14 +48,13 @@ function toast(msg, cls, ms) {
   toast._t = setTimeout(() => t.className = "", ms || 3500);
 }
 function showTab(tab) {
-  ["dashboard", "create", "vms", "detail", "host", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
+  ["dashboard", "create", "vms", "detail", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
   const navTab = tab === "detail" ? "vms" : tab;
   document.querySelectorAll(".side-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
-  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", detail:"INVENTORY", host:"HOST", settings:"SETTINGS"})[tab] || "PHASE";
+  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", detail:"INVENTORY", settings:"SETTINGS"})[tab] || "PHASE";
   $("plan-loader").classList.toggle("hide", tab !== "create");
   if (tab === "vms") loadVms();
   if (tab === "dashboard") loadDashboard();
-  if (tab === "host") loadHost();
   if (tab === "settings") loadSettings();
 }
 
@@ -69,7 +68,8 @@ function init() {
     meta = m;
     $("hostline").textContent = m.host || "";
     buildSizeChips();
-    fillSelect($("f-os"), m.oses);
+    const images = (m.system_images || []).map(i => [`${i.os} · ${i.disk}`, i.os]);
+    fillSelect($("f-os"), images.length ? images : m.oses);
     fillSelect($("f-bridge"), ["", ...(m.networks || [])].map(v => [v || "(template default)", v]));
     fillSelect($("f-sshkey"), ["", ...(m.ssh_keys || [])].map(v => [v || "(none)", v]));
     const storages = ["", ...(m.storages || [])];
@@ -223,7 +223,7 @@ function toBackend(st) {
     name: st.name, description: st.description, tags: st.tags,
     onboot: st.onboot, protect: st.protect, size: st.size,
     cores: st.cores, memory: st.memory, gpu: st.gpu, os: st.os,
-    os_disk_size: "", os_disk_storage: "",
+    system_disk_id: st.system_disk_id || "scsi0", os_disk_size: "", os_disk_storage: "",
     data_disks: st.disks.map(d => ({ id: d.id, size: d.size, storage: d.storage })),
     bridge: st.bridge, vlan: st.vlan, ipmode: st.ipmode, ip: st.ip, gw: st.gw,
     bootstrap: st.bootstrap, ssh_keys: st.ssh_keys,
@@ -238,6 +238,8 @@ function readForm() {
   state.cores = $("f-cores").value.trim();
   state.memory = $("f-memory").value.trim();
   state.os = $("f-os").value;
+  const image = (meta.system_images || []).find(i => i.os === state.os);
+  state.system_disk_id = image ? image.disk : "scsi0";
   state.bridge = $("f-bridge").value;
   state.vlan = $("f-vlan").value.trim();
   state.ipmode = document.querySelector("input[name=ipmode]:checked").value;
@@ -417,14 +419,14 @@ async function loadDashboard() {
   const machines = vms.filter(v => !v.template);
   const active = machines.filter(v => v.status === "running").length;
   const templates = vms.filter(v => v.template).length;
-  const allocatedCores = machines.reduce((n, v) => n + Number(v.cores || 0), 0);
-  const allocatedMemory = machines.reduce((n, v) => n + Number(v.memory || 0), 0) * 1024 * 1024;
-  $("dashboard-metrics").innerHTML = metric("Machines", machines.length, `${allocatedCores} vCPU allocated`) + metric("Running", active, "") + metric("Templates", templates, "") + metric("Allocated memory", bytes(allocatedMemory), "");
+  const s = host.status || {}, m = s.memory || {}, root = s.rootfs || {};
+  const load = Array.isArray(s.loadavg) ? s.loadavg[0] : s.loadavg;
+  const cpuCount = s.cpuinfo && s.cpuinfo.cpus;
+  $("dashboard-metrics").innerHTML = metric("Machines", machines.length, "") + metric("Running", active, "") + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", cpuCount ? `${cpuCount} logical CPUs · load ${Number(load || 0).toFixed(2)}` : "") + metric("Memory", bytes(m.used), m.total ? `${Math.round(100 * m.used / m.total)}% of ${bytes(m.total)}` : "") + metric("Root filesystem", bytes(root.used), root.total ? `${Math.round(100 * root.used / root.total)}% used` : "") + metric("Templates", templates, "");
   $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
   $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
-  const m = (host.status || {}).memory || {};
-  const s = host.status || {}, load = Array.isArray(s.loadavg) ? s.loadavg[0] : s.loadavg;
-  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><span>${bytes(m.used)} / ${bytes(m.total)} memory</span><span>${s.cpuinfo && s.cpuinfo.cpus ? s.cpuinfo.cpus + " logical CPUs" : ""}${load != null ? ` · load ${Number(load).toFixed(2)}` : ""}</span>`;
+  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="util-line"><span>CPU</span><div class="capacity"><span style="width:${Math.min(100, 100 * Number(s.cpu || 0))}%"></span></div><b>${Math.round(100 * Number(s.cpu || 0))}%</b></div><div class="util-line"><span>Memory</span><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><b>${m.total ? Math.round(100 * m.used / m.total) : 0}%</b></div><div class="util-line"><span>Root</span><div class="capacity"><span style="width:${root.total ? Math.min(100, 100 * (root.used || 0) / root.total) : 0}%"></span></div><b>${root.total ? Math.round(100 * root.used / root.total) : 0}%</b></div>`;
+  $("dashboard-storage").innerHTML = (host.storage || []).map(x => { const total=Number(x.total||0), used=Number(x.used||0), pct=total?Math.min(100,100*used/total):0; return `<div class="storage-bar"><span><b>${esc(x.storage || x.name || "—")}</b><small>${esc(x.type || "storage")} · ${esc(x.status || "unknown")}</small></span><div class="capacity"><span style="width:${pct}%"></span></div><span>${total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable"}</span></div>`; }).join("") || "<span class=\"sub\">No storage data.</span>";
 }
 async function loadHost() {
   const host = await api("/api/host");
@@ -449,6 +451,14 @@ async function saveSettings() {
   if (r.error) return toast(r.error, "err");
   toast("Settings saved to phase.json", "ok"); init();
 }
+async function rotateToken() {
+  if (!confirm("Rotate the Phase access token? Other browser sessions will need the new token.")) return;
+  const r = await api("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({settings:{rotate_token:true}})});
+  if (!r.ok || !r.new_token) return toast(r.error || "Token rotation failed", "err");
+  token = r.new_token;
+  localStorage.setItem(TOKEN_KEY, token);
+  toast("Access token rotated for this browser", "ok", 6000);
+}
 
 // ------------------------------------------------------------------------
 // VM detail
@@ -466,7 +476,7 @@ function renderDetail(vm) {
   $("detail-status").textContent = vm.template ? "template" : vm.status;
   $("detail-ip").textContent = vm.ip ? "· " + vm.ip : "";
 
-  const disks = vm.disks.map(d => `${d.id} (${d.size || d.volume || "?"}${d.storage ? " · " + d.storage : ""})`).join("<br>") || "—";
+  const disks = vm.disks.map(d => `${d.id} (${d.size || d.volume || "?"}${d.role === "system" ? " · system image" : ""})`).join("<br>") || "—";
   const body = $("detail-body");
   body.innerHTML = `
   <div class="grid2">
@@ -514,7 +524,7 @@ function renderDetail(vm) {
       <tbody>
         ${vm.disks.map(d => `
         <tr>
-          <td><b>${d.id}</b><small>${d.bus || d.id.replace(/\d+$/, "")}</small></td>
+          <td><b>${d.id}</b><small>${d.role === "system" ? `System image${d.image ? " · " + esc(d.image) : ""}` : (d.bus || d.id.replace(/\d+$/, ""))}</small></td>
           <td>${d.size || "—"}</td><td>${d.storage || "—"}</td><td class="disk-volume">${d.volume || "—"}</td>
           <td class="disk-actions"><details><summary>Manage</summary><div class="disk-menu"><label>New size<input type="text" class="resize-in" data-id="${d.id}" placeholder="e.g. +20G"></label><button class="btn ghost mini" data-resize="${d.id}">Resize</button></div></details></td>
         </tr>`).join("")}
@@ -688,47 +698,11 @@ async function vmDestroy(name) {
 // ------------------------------------------------------------------------
 // terminal
 
-let term = null, termFit = null, termWs = null;
 function openTerminal(name) {
   openTerminalPath("ssh", name, "SSH");
 }
 function openTerminalPath(kind, name, label) {
-  $("term-modal").classList.remove("hide");
-  $("term-kind").textContent = label || "terminal";
-  $("term-title").textContent = name + " · connecting…";
-  if (term) { term.dispose(); term = null; }
-  const el = $("term");
-  el.innerHTML = "";
-  term = new Terminal({
-    cursorBlink: true, fontFamily: 'ui-monospace, "Cascadia Mono", Menlo, monospace',
-    fontSize: 13, theme: { background: "#0d1117", foreground: "#c9d1d9" },
-    scrollback: 4000,
-  });
-  termFit = new FitAddon.FitAddon();
-  term.loadAddon(termFit);
-  term.open(el);
-  termFit.fit();
-  term.focus();
-  term.onData(d => { if (termWs && termWs.readyState === 1) termWs.send(d); });
-  const proto = location.protocol === "https:" ? "wss:" : "ws:";
-  const endpoint = kind === "host" ? "/api/host/terminal" : "/api/" + kind + "/" + encodeURIComponent(name);
-  termWs = new WebSocket(proto + "//" + location.host + endpoint + (token ? "?token=" + encodeURIComponent(token) : ""));
-  termWs.onopen = () => {
-    $("term-title").textContent = name + " · connected (exit with logout/exit)";
-    term.focus();
-  };
-  termWs.onmessage = e => term.write(e.data);
-  termWs.onclose = () => {
-    term.write("\r\n\x1b[33m[connection closed]\x1b[0m\r\n");
-    $("term-title").textContent = name + " · disconnected";
-  };
-  termWs.onerror = () => { term.write("\r\n[connection error]\r\n"); };
-  setTimeout(() => termFit.fit(), 200);
-}
-function closeTerminal() {
-  $("term-modal").classList.add("hide");
-  if (termWs) { try { termWs.close(); } catch (e) {} termWs = null; }
-  if (term) { term.dispose(); term = null; }
+  window.open(`/terminal.html?kind=${encodeURIComponent(kind)}&name=${encodeURIComponent(name)}`, `phase-${kind}-${name}`, "popup,width=1040,height=720,resizable=yes,scrollbars=no");
 }
 
 // ------------------------------------------------------------------------
@@ -744,14 +718,14 @@ $("save-settings").addEventListener("click", saveSettings);
 $("btn-refresh").addEventListener("click", () => {
   if ($("view-vms").classList.contains("hide") === false) loadVms();
   else if ($("view-dashboard").classList.contains("hide") === false) loadDashboard();
-  else if ($("view-host").classList.contains("hide") === false) loadHost();
   else if (currentVm) openVm(currentVm.name);
 });
 $("loadplan").addEventListener("change", e => e.target.value && loadPlan(e.target.value));
 $("act-create").addEventListener("click", () => runCreateAction("create"));
 $("act-provision").addEventListener("click", () => runCreateAction("provision"));
 $("act-save").addEventListener("click", () => runCreateAction("save"));
-$("term-close").addEventListener("click", closeTerminal);
+$("reset-token").addEventListener("click", rotateToken);
+$("forget-token").addEventListener("click", () => { localStorage.removeItem(TOKEN_KEY); token = ""; toast("Token forgotten on this browser", "ok"); });
 ["f-name","f-desc","f-cores","f-memory","f-vlan","f-ip","f-gw","f-tags",
  "f-gpu","f-os","f-bridge","f-sshkey"]
   .forEach(id => $(id) && $(id).addEventListener("input", debouncedValidate));
