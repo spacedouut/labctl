@@ -237,9 +237,23 @@ class PveApi:
         raise PhaseError(f"guest exec timed out after {timeout or 300}s")
 
     def guest_cmd(self, vmid: int, *cmd):
-        """Run a QGA command; returns parsed JSON of its stdout (or None)."""
+        """Run a QGA command; returns parsed JSON of its result (or None).
+
+        QGA commands with dedicated PVE endpoints (network-get-interfaces,
+        get-osinfo, ...) are GETs that return {"data": {"result": ...}}.
+        Unknown commands fall back to guest-exec and parse out-data.
+        """
+        name = cmd[0] if cmd else ""
         try:
-            resp = self._agent_exec(vmid, list(cmd), timeout=30)
+            resp = self._req("GET",
+                             f"/nodes/{self.node()}/qemu/{vmid}/agent/{name}")
+            if isinstance(resp, dict) and "result" in resp:
+                return resp["result"]
+            return resp
+        except PhaseError:
+            pass  # no dedicated endpoint — try guest-exec below
+        try:
+            resp = self._agent_exec(vmid, list(cmd))
         except PhaseError:
             return None
         out = resp.get("out-data") or ""

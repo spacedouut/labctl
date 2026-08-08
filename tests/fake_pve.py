@@ -180,6 +180,20 @@ class Handler(BaseHTTPRequestHandler):
             if m:
                 return self._send({"data": {"exited": 1, "exitcode": 0,
                                             "out-data": "", "err-data": ""}})
+            m = re.fullmatch(
+                r"/api2/json/nodes/fake/qemu/(\d+)/agent/(network-get-interfaces|get-osinfo)", path)
+            if m:
+                vmid = m.group(1)
+                ip = f"10.10.1.{int(vmid) - 100}"
+                result = [{"hardware-address": "00:00:00:00:00:00", "name": "lo",
+                           "ip-addresses": [{"ip-address": "127.0.0.1",
+                                               "ip-address-type": "ipv4",
+                                               "prefix": 8}]},
+                          {"hardware-address": "bc:24:11:00:00:00", "name": "eth0",
+                           "ip-addresses": [{"ip-address": ip,
+                                               "ip-address-type": "ipv4",
+                                               "prefix": 24}]}]
+                return self._send({"data": {"result": result}})
             m = re.fullmatch(r"/api2/json/nodes/fake/tasks/([^/]+)/status", path)
             if m:
                 return self._send({"data": {"status": "stopped"}})
