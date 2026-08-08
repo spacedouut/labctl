@@ -217,8 +217,6 @@ class PveApi:
     def _agent_exec(self, vmid: int, command: list[str],
                     timeout: int = 0, input_data: str | None = None) -> dict:
         body = {"command": json.dumps(command)}
-        if timeout:
-            body["timeout"] = timeout
         if input_data is not None:
             body["input-data"] = input_data
         resp = self._req("POST",
