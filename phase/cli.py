@@ -31,9 +31,9 @@ from .plan import (list_plans, plan_path, print_plan, read_plan, save_plan,
                    parse_flags, gather_plan)
 from .provision import (cmd_vm_bootstrap, cmd_vm_create, cmd_vm_nextid,
                         cmd_vm_provision, cmd_vm_wait)
-from .qm import Qm, vzdump_backup
+from .qm import Qm
 from .report import cmd_report
-from .transport import make_transport
+from .transport import make_qm
 from .util import (PhaseError, confirm, die, log,
                    normalize_tags, validate_name, validate_tag, warn)
 from .vm import (all_vms, best_guest_ip, find_vmid, has_known_ssh_key,
@@ -140,7 +140,7 @@ def _main(argv: list[str]) -> int:
         return cmd_update()
 
     cfg = Config.load_optional(cfg_path)
-    qm = Qm(make_transport(host))
+    qm = make_qm(cfg, host)
 
     handlers = {
         "vm": lambda: cmd_vm(cfg, qm, argv, json_out),
@@ -628,7 +628,7 @@ def cmd_vm_backup(cfg, qm, name, rest) -> int:
         kwargs["compress"] = opts["compress"]
     log(f"Backing up {name} (VMID {vmid}) → {storage} [{opts['mode']}]...")
     try:
-        out = vzdump_backup(qm.t, vmid, **kwargs)
+        out = qm.vzdump(vmid, **kwargs)
     except PhaseError as e:
         append_event(event="vm.backup.failed", vmid=vmid, name=name, detail=str(e))
         if opts["notify"] or cfg.get("notify.enabled"):

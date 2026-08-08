@@ -215,10 +215,9 @@ def _vm_destroy(cfg, qm, name: str) -> str:
 
 
 def _vm_backup(cfg, qm, name: str) -> str:
-    from .qm import vzdump_backup
     vmid = find_vmid(qm, name)
     storage = _dget(cfg, "backup.storage") or "local"
-    out = vzdump_backup(qm.t, vmid, storage=storage, mode="snapshot")
+    out = qm.vzdump(vmid, storage=storage, mode="snapshot")
     for line in out.splitlines():
         if "INFO: Finished" in line or "INFO: Starting" in line:
             log(line)

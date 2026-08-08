@@ -119,6 +119,15 @@ class Qm:
     def terminal(self, vmid: int) -> None:
         os.execvp("qm", ["qm", "terminal", str(vmid)])
 
+    def pvesh(self, path: str):
+        return pvesh_get(self.t, path)
+
+    def pvesm(self) -> list[dict]:
+        return pvesm_status(self.t)
+
+    def vzdump(self, vmid: int, **opts) -> str:
+        return vzdump_backup(self.t, vmid, **opts)
+
     # -- guest agent ---------------------------------------------------------
 
     def guest_ping(self, vmid: int) -> bool:

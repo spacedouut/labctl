@@ -767,12 +767,123 @@ def test_engine_daemon():
     shutil.rmtree(tmp)
 
 
+def test_pve_api():
+    print("pve api client (fake pve server)")
+    import json as _json
+    import threading as _threading
+    import time as _time
+    import urllib.request as _url
+    from phase.config import Config
+    from phase.pveapi import PveApi
+    from phase.web import run
+
+    tmp = fresh_tmp()
+    os.environ.update({k: v for k, v in _env(tmp).items()})
+    os.environ["PHASE_WEB_TEST_SSH_CMD"] = "cat"
+    os.environ["FAKE_PVE_TOKEN"] = "test-token"
+    # point the web server's qm at the fake PVE API via env
+    os.environ["PVE_API_URL"] = "http://127.0.0.1:8943/api2/json"
+    os.environ["PVE_API_TOKEN"] = "test-token"
+    os.environ["PVE_VERIFY_TLS"] = "0"
+    sys.path.insert(0, os.path.join(ROOT, "tests"))
+    import fake_pve
+    fake_pve.serve(8943)
+    _time.sleep(0.5)
+
+    api = PveApi("test-token", url="http://127.0.0.1:8943/api2/json",
+                 verify_tls=False)
+
+    # parity with the qm CLI path: seeded VMs from seed.py
+    vms = api.list_vms()
+    check("pve list_vms", len(vms) >= 5 and all("name" in v for v in vms))
+    gateway = next(v for v in vms if v["name"] == "gateway")
+    check("pve list running", gateway["status"] == "running")
+    check("pve list template flag", any(v.get("template") for v in vms))
+
+    conf = api.config(gateway["vmid"])
+    check("pve config", conf["name"] == "gateway" and "memory" in conf)
+    check("pve config typed", conf["cores"] == "2")
+    check("pve status", api.status(gateway["vmid"]) == "running")
+    check("pve nextid", api.nextid() > 100)
+
+    # guest agent
+    check("pve guest ping", api.guest_ping(gateway["vmid"]) is True)
+    ips = api.guest_cmd(gateway["vmid"], "network-get-interfaces")
+    check("pve guest cmd ips", isinstance(ips, list) and ips
+          and any(a.get("ip-addresses") for a in ips))
+    g = api.guest_exec(gateway["vmid"], ["echo", "hi"])
+    check("pve guest exec", g.get("exitcode") == 0)
+
+    # mutations
+    api.set(gateway["vmid"], cores="4")
+    check("pve set applied", api.config(gateway["vmid"])["cores"] == "4")
+    api.snapshot(gateway["vmid"], "test-snap")
+    snaps = api.listsnapshot(gateway["vmid"])
+    check("pve snapshot listed", any(s["name"] == "test-snap" for s in snaps))
+    api.rollback(gateway["vmid"], "test-snap")
+    api.stop(gateway["vmid"])
+    check("pve stop", api.status(gateway["vmid"]) == "stopped")
+    api.start(gateway["vmid"])
+    check("pve start", api.status(gateway["vmid"]) == "running")
+    api.resize(gateway["vmid"], "scsi0", "40G")
+    check("pve resize", "size=40G" in api.config(gateway["vmid"])["scsi0"])
+
+    # storage + host reads
+    st = api.pvesm()
+    check("pve pvesm", any(s["name"] == "local" for s in st))
+    host = api.pvesh("/nodes/fake/status")
+    check("pve pvesh", host.get("pveversion") == "fake 9.2.9")
+
+    # clone + destroy (temp VM range)
+    nid = api.nextid()
+    api.clone(gateway["vmid"], nid, name="tmp-pve-clone")
+    check("pve clone", api.status(nid) == "stopped"
+          and api.config(nid)["name"] == "tmp-pve-clone")
+    api.destroy(nid)
+    check("pve destroy", all(v["vmid"] != nid for v in api.list_vms()))
+
+    # web console over the PVE API backend
+    cfg = Config.load()
+    port = 8944
+    t = _threading.Thread(target=run, args=(cfg, api),
+                          kwargs={"listen": "127.0.0.1", "port": port},
+                          daemon=True)
+    t.start()
+    _time.sleep(0.8)
+    base = f"http://127.0.0.1:{port}"
+    meta = _json.loads(_url.urlopen(base + "/api/meta").read())
+    check("web meta over api", "small" in meta["sizes"]
+          and "ubuntu-26" in meta["oses"])
+    vms = _json.loads(_url.urlopen(base + "/api/vms").read())
+    check("web vms over api", any(v["name"] == "gateway" for v in vms)
+          and vms[0]["ip"])
+    det = _json.loads(_url.urlopen(base + "/api/vms/gateway").read())
+    check("web detail over api", det["status"] == "running"
+          and len(det["disks"]) >= 1)
+    req = _url.Request(base + "/api/vms/gateway/power",
+                       data=_json.dumps({"action": "stop"}).encode(),
+                       headers={"Content-Type": "application/json"})
+    tr = _json.loads(_url.urlopen(req).read())
+    check("web power over api", tr["ok"] and tr["task"])
+    end = _time.time() + 10
+    while _time.time() < end:
+        r = _json.loads(_url.urlopen(base + "/api/task/" + tr["task"]).read())
+        if r["status"] != "running":
+            break
+        _time.sleep(0.2)
+    check("web power over api done", r["status"] == "done")
+    check("web stopped over api",
+          _json.loads(_url.urlopen(base + "/api/vms/gateway").read())
+          ["status"] == "stopped")
+    shutil.rmtree(tmp)
+
+
 def main():
     global failed
     tests = [test_util_units, test_core, test_plan_crud, test_template_pipeline,
              test_dry_run, test_destroy_yes, test_engine_daemon, test_tui,
              test_tui_create_start, test_wizard_units, test_wizard_tui,
-             test_inline_wizard, test_web_api]
+             test_inline_wizard, test_web_api, test_pve_api]
     for t in tests:
         try:
             t()

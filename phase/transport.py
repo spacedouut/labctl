@@ -68,3 +68,29 @@ class SSHTransport(Transport):
 def make_transport(host: str | None = None) -> Transport:
     host = host or os.environ.get("PHASE_HOST") or None
     return SSHTransport(host) if host else LocalTransport()
+
+
+def make_qm(cfg, host: str | None = None):
+    """Pick the VM backend: PVE API when a token is configured, else qm CLI.
+
+    Config keys: `pve.api_token` (full `user@realm!tokenid=secret`),
+    optional `pve.api_url` (default https://localhost:8006/api2/json) and
+    `pve.verify_tls` (default true). Env overrides: PVE_API_URL,
+    PVE_VERIFY_TLS.
+    """
+    from .pveapi import PveApi
+
+    token = None
+    url = None
+    verify = None
+    if cfg is not None:
+        token = cfg.get("pve.api_token") or None
+        url = cfg.get("pve.api_url") or None
+        vt = cfg.get("pve.verify_tls")
+        verify = None if vt is None else bool(vt)
+    token = token or os.environ.get("PVE_API_TOKEN") or None
+    if token:
+        return PveApi(token, url=url, verify_tls=verify)
+    from .qm import Qm
+
+    return Qm(make_transport(host))

@@ -26,7 +26,7 @@ from .config import (engine_socket_path, engine_state_path, ensure_state_dirs,
 from .log import append_event, tail_events
 from .notify import send
 from .plan import parse_flags
-from .qm import Qm, pvesh_get, pvesm_status
+from .qm import Qm
 from .util import PhaseError, die, human_bytes, log, warn
 from .vm import list_templates, next_template_vmid, next_vmid
 
@@ -55,10 +55,11 @@ WantedBy=multi-user.target
 # discovery (engine scan)
 
 
-def _host_info(transport) -> dict:
+def _host_info(qm) -> dict:
+    transport = qm.t
     node = transport.run(["hostname", "-s"]).stdout.strip()
     info = {"node": node}
-    st = pvesh_get(transport, f"/nodes/{node}/status") or {}
+    st = qm.pvesh(f"/nodes/{node}/status") or {}
     info.update({
         "pveversion": st.get("pveversion", ""),
         "kversion": st.get("kversion", ""),
@@ -197,8 +198,8 @@ def engine_scan(cfg, qm: Qm) -> dict:
     t = qm.t
     vms = qm.list_vms()
     info = {
-        "host": _host_info(t),
-        "storages": pvesm_status(t),
+        "host": _host_info(qm),
+        "storages": qm.pvesm(),
         "bridges": _bridges(t),
         "gpu": {
             "mdev_types": _discover_mdev(t),

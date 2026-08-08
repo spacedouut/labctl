@@ -356,12 +356,12 @@ else:
 
         async def on_mount(self) -> None:
             from .config import Config
-            from .qm import Qm
-            from .transport import make_transport
+            from .transport import make_qm
             from .util import PhaseError
             from .vm import list_template_oses
 
             self.cfg = Config.load_optional(self.cfg_path)
+            self.qm = make_qm(self.cfg)
             self.sizes = dict(self.cfg.get("templates.sizes") or {}) if self.cfg else {}
 
             # sizes -> radio chips (resources step)
