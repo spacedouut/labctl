@@ -101,6 +101,7 @@ def _meta(cfg, qm) -> dict:
         "oses": [o for o in list_template_oses(cfg, qm) if o != "none"],
         "networks": list((_dget(cfg, "networks") or {}).keys()),
         "ssh_keys": list(_dget(cfg, "vm.ssh_keys") or []),
+        "storages": [s.get("name") for s in qm.pvesm() if s.get("name")],
         "plans": list_plans(),
         "next_vmid": next_vmid(qm),
     }

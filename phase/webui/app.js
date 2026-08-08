@@ -11,6 +11,7 @@ let state = {
   name: "", description: "", tags: [], onboot: true, protect: false,
   size: "", cores: "", memory: "", gpu: "", os: "",
   disks: [],
+  hardware: { firmware: "bios", secure_boot: false, tpm: false, efi_storage: "", tpm_storage: "", display: "default", audio: "none" },
   bridge: "", vlan: "", ipmode: "dhcp", ip: "", gw: "",
   bootstrap: { system: false, docker: false, tailscale: false },
   ssh_keys: [],
@@ -50,7 +51,7 @@ function showTab(tab) {
   ["dashboard", "create", "vms", "detail", "host", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
   const navTab = tab === "detail" ? "vms" : tab;
   document.querySelectorAll(".side-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
-  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE / NEW INSTANCE", vms:"INVENTORY / VIRTUAL MACHINES", detail:"INVENTORY / VM DETAIL", host:"NODE / HOST", settings:"PHASE / SETTINGS"})[tab] || "PHASE";
+  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", detail:"INVENTORY", host:"HOST", settings:"SETTINGS"})[tab] || "PHASE";
   $("plan-loader").classList.toggle("hide", tab !== "create");
   if (tab === "vms") loadVms();
   if (tab === "dashboard") loadDashboard();
@@ -71,6 +72,10 @@ function init() {
     fillSelect($("f-os"), m.oses);
     fillSelect($("f-bridge"), ["", ...(m.networks || [])].map(v => [v || "(template default)", v]));
     fillSelect($("f-sshkey"), ["", ...(m.ssh_keys || [])].map(v => [v || "(none)", v]));
+    const storages = ["", ...(m.storages || [])];
+    fillSelect($("disk-new-storage"), storages.map(v => [v || "Select storage", v]));
+    fillSelect($("f-efi-storage"), storages.map(v => [v || "Default storage", v]));
+    fillSelect($("f-tpm-storage"), storages.map(v => [v || "Default storage", v]));
     fillSelect($("loadplan"), ["", ...(m.plans || []).map(p => p.name)].map(v => [v || "— new VM —", v]));
     if (m.sizes && m.sizes.small) state.size = "small";
     else if (m.sizes) state.size = Object.keys(m.sizes)[0];
@@ -78,6 +83,7 @@ function init() {
     buildStepper();
     renderAll();
     debouncedValidate();
+    if (!$("view-dashboard").classList.contains("hide")) loadDashboard();
   }).catch(e => {
     $("rail-plan").textContent = "Enter the access token to load this console.";
     toast(e.message || "Could not load phase", "err", 6000);
@@ -199,12 +205,14 @@ function renderDisks() {
   });
 }
 function addDisk() {
-  const id = $("disk-new-id").value.trim();
+  const bus = $("disk-new-bus").value;
   const size = $("disk-new-size").value.trim();
   const storage = $("disk-new-storage").value.trim();
-  if (!id || !size) { toast("id and size required", "err"); return; }
-  state.disks.push({ id, size, storage });
-  $("disk-new-id").value = $("disk-new-size").value = $("disk-new-storage").value = "";
+  if (!size || !storage) { toast("size and storage required", "err"); return; }
+  const used = new Set(state.disks.map(d => d.id)); let n = 0;
+  while (used.has(bus + n)) n++;
+  state.disks.push({ id: bus + n, size, storage });
+  $("disk-new-size").value = "";
   renderDisks();
   debouncedValidate();
 }
@@ -219,6 +227,7 @@ function toBackend(st) {
     data_disks: st.disks.map(d => ({ id: d.id, size: d.size, storage: d.storage })),
     bridge: st.bridge, vlan: st.vlan, ipmode: st.ipmode, ip: st.ip, gw: st.gw,
     bootstrap: st.bootstrap, ssh_keys: st.ssh_keys,
+    hardware: st.hardware,
   };
 }
 
@@ -238,6 +247,9 @@ function readForm() {
   state.onboot = $("f-onboot").checked;
   state.protect = $("f-protect").checked;
   state.gpu = $("f-gpu").value.trim();
+  state.hardware = { firmware: $("f-firmware").value, secure_boot: $("f-secureboot").checked,
+    tpm: $("f-tpm").checked, efi_storage: $("f-efi-storage").value,
+    tpm_storage: $("f-tpm-storage").value, display: $("f-display").value, audio: $("f-audio").value };
   state.bootstrap.system = $("f-bs-system").checked;
   state.bootstrap.docker = $("f-bs-docker").checked;
   state.bootstrap.tailscale = $("f-bs-tailscale").checked;
@@ -259,6 +271,9 @@ function writeForm() {
   $("f-onboot").checked = !!state.onboot;
   $("f-protect").checked = !!state.protect;
   $("f-gpu").value = state.gpu;
+  const hw = Object.assign({firmware:"bios", secure_boot:false, tpm:false, efi_storage:"", tpm_storage:"", display:"default", audio:"none"}, state.hardware || {});
+  $("f-firmware").value = hw.firmware; $("f-secureboot").checked = hw.secure_boot; $("f-tpm").checked = hw.tpm;
+  $("f-efi-storage").value = hw.efi_storage; $("f-tpm-storage").value = hw.tpm_storage; $("f-display").value = hw.display; $("f-audio").value = hw.audio;
   $("f-bs-system").checked = !!state.bootstrap.system;
   $("f-bs-docker").checked = !!state.bootstrap.docker;
   $("f-bs-tailscale").checked = !!state.bootstrap.tailscale;
@@ -340,6 +355,7 @@ async function loadPlan(name) {
     ip: plan.ipconfig && plan.ipconfig !== "dhcp" ? plan.ipconfig : "",
     gw: plan.gw || "",
     bootstrap: Object.assign({ system: false, docker: false, tailscale: false }, plan.bootstrap || {}),
+    hardware: Object.assign({firmware:"bios", secure_boot:false, tpm:false, efi_storage:"", tpm_storage:"", display:"default", audio:"none"}, plan.hardware || {}),
     ssh_keys: plan.ssh_keys || [],
   };
   writeForm();
@@ -363,8 +379,10 @@ async function loadVms() {
     return;
   }
   tb.innerHTML = "";
-  $("vms-count").textContent = `(${vms.length})`;
-  vms.forEach(v => {
+  const machines = vms.filter(v => !v.template);
+  const templates = vms.filter(v => v.template);
+  $("vms-count").textContent = `(${machines.length} machines · ${templates.length} templates)`;
+  machines.forEach(v => {
     const tr = document.createElement("tr");
     const badge = v.template ? '<span class="badge template">template</span>'
       : `<span class="badge ${v.status}">${v.status}</span>`;
@@ -375,6 +393,10 @@ async function loadVms() {
     tr.addEventListener("click", () => openVm(v.name));
     tb.appendChild(tr);
   });
+  $("inventory-templates").innerHTML = templates.map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>VMID ${v.vmid}</small></span><span class="badge template">template</span></button>`).join("") || `<span class="sub">No templates</span>`;
+  $("inventory-templates").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
+  const storage = (meta && meta.storages) || [];
+  $("inventory-storage").innerHTML = storage.map(s => `<div class="inventory-row"><b>${esc(s)}</b><span>storage pool</span></div>`).join("") || `<span class="sub">No storage pools</span>`;
 }
 
 function bytes(n) {
@@ -712,6 +734,8 @@ $("term-close").addEventListener("click", closeTerminal);
  "f-gpu","f-os","f-bridge","f-sshkey"]
   .forEach(id => $(id) && $(id).addEventListener("input", debouncedValidate));
 ["f-onboot","f-protect","f-bs-system","f-bs-docker","f-bs-tailscale"]
+  .forEach(id => $(id) && $(id).addEventListener("change", debouncedValidate));
+["f-firmware","f-secureboot","f-tpm","f-efi-storage","f-tpm-storage","f-display","f-audio"]
   .forEach(id => $(id) && $(id).addEventListener("change", debouncedValidate));
 
 SECTIONS.forEach(s => {

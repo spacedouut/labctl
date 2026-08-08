@@ -15,22 +15,22 @@
     <div class="node-pill"><span class="live"></span><span id="hostline">connecting…</span></div>
     <nav class="side-nav" aria-label="Console navigation">
       <button data-view="dashboard">Overview</button>
-      <button data-view="vms">Virtual machines</button>
-      <button data-view="create" class="active">Create VM</button>
+      <button data-view="vms">Inventory</button>
       <button data-view="host">Host</button>
     </nav>
     <div class="side-bottom">
+      <button class="btn create-nav" data-view="create">＋ Create VM</button>
       <button data-view="settings">Settings</button>
       <button class="nav-refresh" id="btn-refresh">↻ Refresh data</button>
     </div>
   </aside>
   <section id="workspace">
-    <header id="topbar"><div id="crumb">CREATE / NEW INSTANCE</div><span class="spacer"></span><label id="plan-loader">Load draft <select id="loadplan"></select></label></header>
+    <header id="topbar"><div id="crumb">OVERVIEW</div><span class="spacer"></span><label id="plan-loader">Load draft <select id="loadplan"></select></label></header>
 <div id="wrap">
 
   <!-- ================= OVERVIEW ================= -->
-  <main id="view-dashboard" class="hide">
-    <div class="page-title"><div><span class="eyebrow">CONTROL PLANE</span><h2>Overview</h2><p>What needs your attention right now.</p></div><button class="btn" data-view="create">＋ New VM</button></div>
+  <main id="view-dashboard">
+    <div class="page-title"><h2>Overview</h2><button class="btn" data-view="create">＋ Create VM</button></div>
     <div class="metric-grid" id="dashboard-metrics"></div>
     <div class="grid2"><div class="card"><h3>Recent machines</h3><div id="dashboard-vms" class="compact-list"></div></div><div class="card"><h3>Host capacity</h3><div id="dashboard-host" class="host-readout">loading…</div></div></div>
   </main>
@@ -42,7 +42,6 @@
       <div class="panes">
     <div id="pane-machine" class="pane">
       <h2>Machine configuration</h2>
-      <div class="sub">Basics, sizing, and operating system.</div>
       <div class="card">
         <h3>Basics</h3>
         <div class="row">
@@ -71,7 +70,6 @@
 
     <div id="pane-disks" class="pane hide">
       <h2>Disks</h2>
-      <div class="sub">The template supplies the system disk. Add any extra data disks here.</div>
       <div class="card">
         <h3>Additional disks</h3>
         <table id="disk-table">
@@ -79,18 +77,16 @@
           <tbody></tbody>
         </table>
         <div class="row disk-addrow">
-          <input type="text" id="disk-new-id" placeholder="id (scsi1)" spellcheck="false">
+          <select id="disk-new-bus"><option value="scsi">SCSI</option><option value="sata">SATA</option><option value="virtio">VirtIO</option><option value="ide">IDE</option></select>
           <input type="text" id="disk-new-size" placeholder="size (50G)" spellcheck="false">
-          <input type="text" id="disk-new-storage" placeholder="storage (nas)" spellcheck="false">
+          <select id="disk-new-storage"></select>
           <button class="btn ghost" id="disk-add">＋ Add disk</button>
         </div>
-        <div class="hint">Disk order stays in Proxmox’s hands; phase never overrides it.</div>
       </div>
     </div>
 
     <div id="pane-network" class="pane hide">
       <h2>Network</h2>
-      <div class="sub">Bridge, VLAN, and IP addressing.</div>
       <div class="card">
         <div class="row">
           <div class="field"><label>Bridge</label><select id="f-bridge"></select></div>
@@ -113,7 +109,6 @@
 
     <div id="pane-others" class="pane hide">
       <h2>Others</h2>
-      <div class="sub">Tags, lifecycle flags, GPU, bootstrap.</div>
       <div class="card">
         <div class="row">
           <div class="field" style="flex:1"><label>Tags <span class="req">(comma separated)</span></label>
@@ -123,8 +118,19 @@
         <label class="toggle"><input type="checkbox" id="f-protect"> Protected (no accidental destroy)</label>
       </div>
       <div class="card">
+        <h3>Firmware & devices</h3>
+        <div class="row">
+          <div class="field"><label>Firmware</label><select id="f-firmware"><option value="bios">Legacy BIOS</option><option value="uefi">UEFI</option></select></div>
+          <div class="field"><label>Display</label><select id="f-display"><option value="default">Template default</option><option value="std">Standard VGA</option><option value="virtio">VirtIO-GPU</option><option value="serial0">Serial console</option><option value="none">None</option></select></div>
+          <div class="field"><label>Audio</label><select id="f-audio"><option value="none">None</option><option value="intel-hda">Intel HDA</option><option value="ich9-intel-hda">ICH9 Intel HDA</option><option value="AC97">AC97</option></select></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-secureboot"> Secure Boot</label>
+        <label class="toggle"><input type="checkbox" id="f-tpm"> TPM 2.0</label>
+        <div class="row" id="hardware-storage"><div class="field"><label>UEFI disk storage</label><select id="f-efi-storage"></select></div><div class="field"><label>TPM storage</label><select id="f-tpm-storage"></select></div></div>
+      </div>
+      <div class="card">
         <h3>GPU</h3>
-        <div class="field"><label>mdev <span class="hint">(optional)</span></label>
+        <div class="field"><label>mdev UUID <span class="hint">(manual)</span></label>
           <input type="text" id="f-gpu" placeholder="e.g. nvidia-223" spellcheck="false"></div>
       </div>
       <div class="card">
@@ -158,16 +164,18 @@
     </div>
   </main>
 
-  <!-- ================= VMS LIST ================= -->
+  <!-- ================= INVENTORY ================= -->
   <main id="view-vms" class="hide">
-    <div class="page-title"><div><span class="eyebrow">INVENTORY</span><h2>Virtual machines <span class="sub" id="vms-count"></span></h2><p>Operate the fleet without leaving this page.</p></div><button class="btn" data-view="create">＋ New VM</button></div>
+    <div class="page-title"><h2>Inventory <span class="sub" id="vms-count"></span></h2><button class="btn" data-view="create">＋ Create VM</button></div>
     <div class="card">
+      <h3>Virtual machines</h3>
       <table id="vms-table">
         <thead><tr><th>Name</th><th>VMID</th><th>Status</th><th>IP</th>
           <th>vCPU</th><th>RAM</th><th>Tags</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
+    <div class="grid2"><div class="card"><h3>Templates</h3><div class="compact-list" id="inventory-templates"></div></div><div class="card"><h3>Storage</h3><div class="compact-list" id="inventory-storage"></div></div></div>
   </main>
 
   <!-- ================= VM DETAIL ================= -->
@@ -186,14 +194,14 @@
 
   <!-- ================= HOST ================= -->
   <main id="view-host" class="hide">
-    <div class="page-title"><div><span class="eyebrow">NODE</span><h2>Host</h2><p>Read the node; open a console when you actually need to intervene.</p></div><button class="btn" id="btn-host-console">⌨ Host console</button></div>
+    <div class="page-title"><h2>Host</h2><button class="btn" id="btn-host-console">⌨ Host console</button></div>
     <div class="metric-grid" id="host-metrics"></div>
     <div class="card"><h3>Storage</h3><table id="host-storage"><thead><tr><th>Pool</th><th>Type</th><th>Status</th><th>Used</th><th>Available</th></tr></thead><tbody></tbody></table></div>
   </main>
 
   <!-- ================= SETTINGS ================= -->
   <main id="view-settings" class="hide">
-    <div class="page-title"><div><span class="eyebrow">PHASE CONFIGURATION</span><h2>Settings</h2><p>These values write to the active <code>phase.json</code>. Credentials remain server-side.</p></div></div>
+    <div class="page-title"><h2>Settings</h2></div>
     <div class="card settings-card"><h3>VM defaults</h3><div class="row"><div class="field"><label>Default SSH user</label><input id="s-default-user" spellcheck="false"></div><div class="field"><label>Default bridge</label><input id="s-default-bridge" spellcheck="false"></div><div class="field"><label>Default storage</label><input id="s-default-storage" spellcheck="false"></div><div class="field"><label>Backup storage</label><input id="s-backup-storage" spellcheck="false"></div></div><label class="toggle"><input type="checkbox" id="s-vm-agent"> Enable QEMU guest agent on created VMs</label><div class="actions"><button class="btn" id="save-settings">Save settings</button></div></div>
   </main>
 </div>

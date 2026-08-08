@@ -244,6 +244,10 @@ def test_inline_wizard():
           and plan["ipconfig"] == "10.10.1.50/24" and plan["gw"] == "10.10.1.1")
     check("state_to_plan bootstrap/tags", plan["bootstrap"]["system"]
           and plan["tags"] == ["db"] and plan["ssh_keys"] == [])
+    st_hw = dict(st, hardware={"firmware": "uefi", "secure_boot": True,
+                                "tpm": True, "display": "virtio",
+                                "audio": "intel-hda"})
+    check("state_to_plan hardware", iw.state_to_plan(st_hw, cfg)["hardware"]["tpm"])
     st2 = dict(st, cores="4", memory="4096")
     p2 = iw.state_to_plan(st2, cfg)
     check("state_to_plan overrides", p2["cores"] == "4" and p2["memory"] == "4096")

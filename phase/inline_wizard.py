@@ -159,6 +159,7 @@ def state_to_plan(state: dict, cfg) -> dict:
         "tags": state.get("tags", []), "ssh_keys": state.get("ssh_keys", []),
         "bootstrap": state.get("bootstrap",
                                {"system": False, "docker": False, "tailscale": False}),
+        "hardware": state.get("hardware", {}),
         "gpu": state.get("gpu") or None, "vmid": 0,
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }

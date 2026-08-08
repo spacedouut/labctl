@@ -322,6 +322,26 @@ def realize_plan(cfg, qm, plan: dict, dry_run: bool = False, out=None) -> int:
     step(["set", str(vmid)] + [p for k, v in set_opts.items()
                                for p in (f"--{k}", str(v))])
 
+    # Optional virtual hardware is intentionally explicit in the web plan.
+    # PVE still owns boot ordering; these merely select the device topology.
+    hw = plan.get("hardware") or {}
+    if hw.get("firmware") == "uefi":
+        step(["set", str(vmid), "--bios", "ovmf", "--machine", "q35"], quiet=True)
+        storage = hw.get("efi_storage") or cfg.get("default_storage")
+        if storage:
+            efi = f"{storage}:1"
+            if hw.get("secure_boot"):
+                efi += ",pre-enrolled-keys=1"
+            step(["set", str(vmid), "--efidisk0", efi], quiet=True)
+    if hw.get("tpm"):
+        storage = hw.get("tpm_storage") or cfg.get("default_storage")
+        if storage:
+            step(["set", str(vmid), "--tpmstate0", f"{storage}:1,version=v2.0"], quiet=True)
+    if hw.get("display") and hw["display"] != "default":
+        step(["set", str(vmid), "--vga", hw["display"]], quiet=True)
+    if hw.get("audio") and hw["audio"] != "none":
+        step(["set", str(vmid), "--audio0", f"device={hw['audio']}"], quiet=True)
+
     # 3. network
     bridge, vlan = plan["net"]["bridge"], plan["net"]["vlan"]
     if bridge or vlan:
