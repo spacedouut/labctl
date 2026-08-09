@@ -128,6 +128,7 @@ def _meta(cfg, qm) -> dict:
         "plans": list_plans(),
         "next_vmid": next_vmid(qm),
         "system_images": images,
+        "live_sync_seconds": _live_sync_seconds(cfg),
     }
 
 
@@ -168,12 +169,24 @@ _EDITABLE_SETTINGS = {
     "default_storage": "default_storage",
     "vm_agent": "vm.agent",
     "backup_storage": "backup.storage",
+    "live_sync_seconds": "web.live_sync_seconds",
 }
+
+
+def _live_sync_seconds(cfg) -> int:
+    """Return a safe browser telemetry cadence, defaulting to two seconds."""
+    try:
+        seconds = int(_dget(cfg, "web.live_sync_seconds", 2))
+    except (TypeError, ValueError):
+        return 2
+    return min(60, max(1, seconds))
 
 
 def _public_settings(cfg) -> dict:
     """Never send credentials or web tokens to the browser."""
-    return {key: _dget(cfg, dotted, "") for key, dotted in _EDITABLE_SETTINGS.items()}
+    out = {key: _dget(cfg, dotted, "") for key, dotted in _EDITABLE_SETTINGS.items()}
+    out["live_sync_seconds"] = _live_sync_seconds(cfg)
+    return out
 
 
 def _save_settings(cfg, updates: dict) -> dict:
@@ -190,6 +203,15 @@ def _save_settings(cfg, updates: dict) -> dict:
             continue
         if key == "vm_agent":
             value = bool(value)
+        elif key == "live_sync_seconds":
+            if isinstance(value, bool):
+                raise ValueError("live_sync_seconds must be a whole number")
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError("live_sync_seconds must be a whole number") from None
+            if not 1 <= value <= 60:
+                raise ValueError("live_sync_seconds must be between 1 and 60")
         elif not isinstance(value, str):
             raise ValueError(f"{key} must be text")
         node = cfg.data
@@ -200,6 +222,7 @@ def _save_settings(cfg, updates: dict) -> dict:
                 raise ValueError(f"cannot update {key}: invalid config shape")
         node[bits[-1]] = value.strip() if isinstance(value, str) else value
     cfg.save()
+    _cache_drop(("meta",))
     out = _public_settings(cfg)
     if new_token:
         out["new_token"] = new_token  # returned once, only to an authenticated caller

@@ -9,7 +9,7 @@ let currentVm = null;
 let liveSyncTimer = null;
 let liveSyncInFlight = false;
 let liveSyncVisibilityBound = false;
-const LIVE_SYNC_MS = 10000;
+let liveSyncMs = 2000;
 
 // ---- create-wizard state (the template owns its system disk) ------------
 let state = {
@@ -125,9 +125,11 @@ async function syncLive() {
     liveSyncInFlight = false;
   }
 }
-function startLiveSync() {
+function startLiveSync(seconds) {
+  const parsed = Number(seconds);
+  if (Number.isFinite(parsed)) liveSyncMs = Math.min(60000, Math.max(1000, Math.round(parsed * 1000)));
   clearInterval(liveSyncTimer);
-  liveSyncTimer = setInterval(syncLive, LIVE_SYNC_MS);
+  liveSyncTimer = setInterval(syncLive, liveSyncMs);
   if (!liveSyncVisibilityBound) {
     document.addEventListener("visibilitychange", () => { if (!document.hidden) syncLive(); });
     liveSyncVisibilityBound = true;
@@ -160,7 +162,7 @@ function init() {
     renderAll();
     debouncedValidate();
     if (!$("view-dashboard").classList.contains("hide")) loadDashboard();
-    startLiveSync();
+    startLiveSync(m.live_sync_seconds);
   }).catch(e => {
     $("rail-plan").textContent = "Enter the access token to load this console.";
     toast(e.message || "Could not load phase", "err", 6000);
@@ -562,6 +564,7 @@ async function loadSettings() {
   $("s-default-storage").value = s.default_storage || "";
   $("s-backup-storage").value = s.backup_storage || "";
   $("s-vm-agent").checked = s.vm_agent !== false;
+  $("s-live-sync-seconds").value = s.live_sync_seconds || 2;
   const pam = auth.mode === "pam";
   $("auth-summary").textContent = pam ? `Signed in as ${auth.user}. Phase access is granted to the configured PAM users.` : "Phase uses an access token; it does not have a separate web password.";
   $("reset-token").classList.toggle("hide", pam);
@@ -569,10 +572,18 @@ async function loadSettings() {
   $("logout").classList.toggle("hide", !pam);
 }
 async function saveSettings() {
-  const settings = {default_user: $("s-default-user").value.trim(), default_bridge: $("s-default-bridge").value.trim(), default_storage: $("s-default-storage").value.trim(), backup_storage: $("s-backup-storage").value.trim(), vm_agent: $("s-vm-agent").checked};
+  const settings = {default_user: $("s-default-user").value.trim(), default_bridge: $("s-default-bridge").value.trim(), default_storage: $("s-default-storage").value.trim(), backup_storage: $("s-backup-storage").value.trim(), vm_agent: $("s-vm-agent").checked, live_sync_seconds: Number($("s-live-sync-seconds").value)};
   const r = await api("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({settings})});
   if (r.error) return toast(r.error, "err");
+  startLiveSync(r.settings.live_sync_seconds);
   toast("Settings saved to phase.json", "ok"); init();
+}
+async function saveTelemetrySettings() {
+  const settings = {live_sync_seconds: Number($("s-live-sync-seconds").value)};
+  const r = await api("/api/settings", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({settings})});
+  if (r.error) return toast(r.error, "err");
+  startLiveSync(r.settings.live_sync_seconds);
+  toast("Telemetry cadence saved", "ok");
 }
 async function rotateToken() {
   if (!confirm("Rotate the Phase access token? Other browser sessions will need the new token.")) return;
@@ -838,6 +849,7 @@ document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click"
 $("btn-back").addEventListener("click", () => showTab("vms"));
 $("btn-host-console").addEventListener("click", () => openTerminalPath("host", "host", "HOST CONSOLE"));
 $("save-settings").addEventListener("click", saveSettings);
+$("save-settings-telemetry").addEventListener("click", saveTelemetrySettings);
 $("btn-refresh").addEventListener("click", () => {
   if ($("view-vms").classList.contains("hide") === false) loadVms();
   else if ($("view-dashboard").classList.contains("hide") === false) loadDashboard();

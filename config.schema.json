@@ -98,7 +98,8 @@
         "token": { "description": "Legacy shared access token; use PAM mode for named users", "type": "string" },
         "auth": { "description": "Authentication mode", "enum": ["none", "token", "pam"] },
         "pam_users": { "description": "Explicit allowlist of Proxmox PAM users permitted to administer Phase", "type": "array", "items": { "type": "string", "pattern": ".+@pam$" }, "uniqueItems": true },
-        "session_ttl_hours": { "description": "PAM web-session lifetime (1-168 hours)", "type": "integer", "minimum": 1, "maximum": 168, "default": 12 }
+        "session_ttl_hours": { "description": "PAM web-session lifetime (1-168 hours)", "type": "integer", "minimum": 1, "maximum": 168, "default": 12 },
+        "live_sync_seconds": { "description": "Browser telemetry refresh cadence in seconds", "type": "integer", "minimum": 1, "maximum": 60, "default": 2 }
       }
     },
 

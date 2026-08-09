@@ -377,9 +377,9 @@ def test_web_api():
     host = get("/api/host")
     check("web host summary", "status" in host and "storage" in host)
     settings = get("/api/settings")
-    check("web public settings", settings["default_user"] == "ubuntu" and "pve" not in settings)
-    saved = post("/api/settings", {"settings": {"default_user": "ubuntu", "vm_agent": True}})
-    check("web settings save", saved["ok"] and saved["settings"]["default_user"] == "ubuntu")
+    check("web public settings", settings["default_user"] == "ubuntu" and settings["live_sync_seconds"] == 2 and "pve" not in settings)
+    saved = post("/api/settings", {"settings": {"default_user": "ubuntu", "vm_agent": True, "live_sync_seconds": 2}})
+    check("web settings save", saved["ok"] and saved["settings"]["default_user"] == "ubuntu" and saved["settings"]["live_sync_seconds"] == 2)
 
     tr = wait_task(post("/api/vms/webvm1/power", {"action": "stop"})["task"])
     check("web power stop", tr["status"] == "done")
