@@ -91,7 +91,7 @@ shows what's attached to which VM, and reports remaining capacity:
 
 Provision them with `phase vm create ... --gpu nvidia-257`.
 
-## Optional extras (copyparty-style)
+## Optional extras
 
 The core is pure stdlib. Optional pip extras unlock features; `phase extras`
 shows the full table:
@@ -101,7 +101,7 @@ shows the full table:
 | `tui`     | textual, rich       | menu UI (`phase`), rich tables/prompts |
 | `notify`  | apprise             | push notifications on long ops |
 | `report`  | jinja2              | `phase report` HTML output |
-| `api`     | proxmoxer           | REST API transport (falls back to qm) |
+| `api`     | proxmoxer           | REST API transport (faster, falls back to qm) |
 
 Install: `uv pip install -e '.[tui,notify]'` in the checkout, or
 `pip install phase[tui]`. Binary extras (rclone, zstd, gum) are detected via
