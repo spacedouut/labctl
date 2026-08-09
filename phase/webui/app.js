@@ -6,6 +6,10 @@ let token = localStorage.getItem(TOKEN_KEY) || "";
 let auth = {mode: "token", authenticated: false, user: null};
 let meta = null;
 let currentVm = null;
+let liveSyncTimer = null;
+let liveSyncInFlight = false;
+let liveSyncVisibilityBound = false;
+const LIVE_SYNC_MS = 10000;
 
 // ---- create-wizard state (the template owns its system disk) ------------
 let state = {
@@ -24,6 +28,7 @@ let errors = {};
 
 async function api(path, opts) {
   opts = opts || {};
+  opts.cache = "no-store";
   opts.headers = Object.assign({}, opts.headers);
   if (token) opts.headers["X-Phase-Token"] = token;
   let r = await fetch(path, opts);
@@ -87,6 +92,48 @@ function showTab(tab) {
   if (tab === "settings") loadSettings();
 }
 
+// Keep operational readouts current without turning every open tab into a
+// background poller. The server already coalesces VM reads; this only runs
+// for the visible overview or inventory and stops when the tab is hidden.
+function activeLiveView() {
+  if (!$("view-dashboard").classList.contains("hide")) return "dashboard";
+  if (!$("view-vms").classList.contains("hide")) return "vms";
+  return null;
+}
+function setLiveSync(text, state) {
+  const el = $("live-sync");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("syncing", state === "syncing");
+  el.classList.toggle("stale", state === "stale");
+}
+function liveTime() {
+  return new Intl.DateTimeFormat(undefined, {hour:"2-digit", minute:"2-digit", second:"2-digit"}).format(new Date());
+}
+async function syncLive() {
+  const view = activeLiveView();
+  if (!view || document.hidden || liveSyncInFlight) return;
+  liveSyncInFlight = true;
+  setLiveSync("LIVE · syncing", "syncing");
+  try {
+    if (view === "dashboard") await loadDashboard();
+    else await loadVms({quiet:true});
+    setLiveSync(`LIVE · ${liveTime()}`);
+  } catch (e) {
+    setLiveSync("LIVE · retrying", "stale");
+  } finally {
+    liveSyncInFlight = false;
+  }
+}
+function startLiveSync() {
+  clearInterval(liveSyncTimer);
+  liveSyncTimer = setInterval(syncLive, LIVE_SYNC_MS);
+  if (!liveSyncVisibilityBound) {
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) syncLive(); });
+    liveSyncVisibilityBound = true;
+  }
+}
+
 // ------------------------------------------------------------------------
 // create wizard
 
@@ -113,6 +160,7 @@ function init() {
     renderAll();
     debouncedValidate();
     if (!$("view-dashboard").classList.contains("hide")) loadDashboard();
+    startLiveSync();
   }).catch(e => {
     $("rail-plan").textContent = "Enter the access token to load this console.";
     toast(e.message || "Could not load phase", "err", 6000);
@@ -398,15 +446,17 @@ async function loadPlan(name) {
 // ------------------------------------------------------------------------
 // VMs list
 
-async function loadVms() {
+async function loadVms(opts) {
+  opts = opts || {};
+  const quiet = !!opts.quiet;
   $("vms-count").textContent = "";
   const tb = $("vms-table").querySelector("tbody");
-  tb.innerHTML = `<tr><td colspan="7" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
+  if (!quiet) tb.innerHTML = `<tr><td colspan="7" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
   let vms, host;
   try {
     [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
   } catch (e) {
-    tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
+    if (!quiet) tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
     return;
   }
   tb.innerHTML = "";
@@ -435,6 +485,7 @@ async function loadVms() {
     return `<button class="storage-pocket ${pct >= 90 ? "critical" : pct >= 75 ? "warning" : ""}" data-storage="${esc(name)}"><span class="storage-pocket-top"><span><b>${esc(name || "—")}</b><small>${esc(s.type || "storage")} · ${esc(s.status || "unknown")}</small></span><strong>${pct}%</strong></span><span class="capacity"><span style="width:${pct}%"></span></span><small>${capacity}</small><span class="storage-open">Open pool <i>→</i></span></button>`;
   }).join("") || `<span class="sub">No storage pools</span>`;
   $("inventory-storage").querySelectorAll("[data-storage]").forEach(b => b.addEventListener("click", () => openStorage(b.dataset.storage)));
+  setLiveSync(`LIVE · ${liveTime()}`);
 }
 
 function storagePercent(s) {
@@ -493,6 +544,7 @@ async function loadDashboard() {
   $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
   $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="util-line"><span>CPU</span><div class="capacity"><span style="width:${Math.min(100, 100 * Number(s.cpu || 0))}%"></span></div><b>${Math.round(100 * Number(s.cpu || 0))}%</b></div><div class="util-line"><span>Memory</span><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><b>${m.total ? Math.round(100 * m.used / m.total) : 0}%</b></div><div class="util-line"><span>Root</span><div class="capacity"><span style="width:${root.total ? Math.min(100, 100 * (root.used || 0) / root.total) : 0}%"></span></div><b>${root.total ? Math.round(100 * root.used / root.total) : 0}%</b></div>`;
   $("dashboard-storage").innerHTML = (host.storage || []).map(x => { const total=Number(x.total||0), used=Number(x.used||0), pct=total?Math.min(100,100*used/total):0; return `<div class="storage-bar"><span><b>${esc(x.storage || x.name || "—")}</b><small>${esc(x.type || "storage")} · ${esc(x.status || "unknown")}</small></span><div class="capacity"><span style="width:${pct}%"></span></div><span>${total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable"}</span></div>`; }).join("") || "<span class=\"sub\">No storage data.</span>";
+  setLiveSync(`LIVE · ${liveTime()}`);
 }
 async function loadHost() {
   const host = await api("/api/host");
