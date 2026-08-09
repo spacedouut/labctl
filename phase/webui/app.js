@@ -78,12 +78,11 @@ function toast(msg, cls, ms) {
 }
 function showTab(tab) {
   ["dashboard", "create", "vms", "storage", "detail", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
-  const navTab = tab === "detail" ? "vms" : tab;
-  document.querySelectorAll(".side-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
-  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", storage:"STORAGE", detail:"INVENTORY", settings:"SETTINGS"})[tab] || "PHASE";
+  const navTab = (tab === "detail" || tab === "storage") ? "vms" : tab;
+  document.querySelectorAll(".side-nav [data-view], .mobile-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
+  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", storage:"INVENTORY / STORAGE", detail:"INVENTORY", settings:"SETTINGS"})[tab] || "PHASE";
   $("plan-loader").classList.toggle("hide", tab !== "create");
   if (tab === "vms") loadVms();
-  if (tab === "storage") loadStorage();
   if (tab === "dashboard") loadDashboard();
   if (tab === "settings") loadSettings();
 }
@@ -430,9 +429,10 @@ async function loadVms() {
   const storage = (host && host.storage) || [];
   $("inventory-storage").innerHTML = storage.map(s => {
     const total = Number(s.total || 0), used = Number(s.used || 0);
-    const capacity = total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable";
+    const pct = storagePercent(s);
+    const capacity = total ? `${bytes(used)} used of ${bytes(total)}` : "capacity unavailable";
     const name = s.storage || s.name || "";
-    return `<button class="inventory-row storage-link" data-storage="${esc(name)}"><span><b>${esc(name || "—")}</b><small>${esc(s.type || "storage")} · ${esc(s.status || "unknown")}</small></span><span>${capacity}</span></button>`;
+    return `<button class="storage-pocket ${pct >= 90 ? "critical" : pct >= 75 ? "warning" : ""}" data-storage="${esc(name)}"><span class="storage-pocket-top"><span><b>${esc(name || "—")}</b><small>${esc(s.type || "storage")} · ${esc(s.status || "unknown")}</small></span><strong>${pct}%</strong></span><span class="capacity"><span style="width:${pct}%"></span></span><small>${capacity}</small><span class="storage-open">Open pool <i>→</i></span></button>`;
   }).join("") || `<span class="sub">No storage pools</span>`;
   $("inventory-storage").querySelectorAll("[data-storage]").forEach(b => b.addEventListener("click", () => openStorage(b.dataset.storage)));
 }
@@ -468,7 +468,7 @@ async function openStorage(name) {
   const s=d.storage || {}, rows=d.content || [], pct=storagePercent(s), total=Number(s.total||0), used=Number(s.used||0), avail=Number(s.avail || Math.max(0,total-used));
   const kinds={}; rows.forEach(r => { const k=r.content || r.format || "volume"; kinds[k]=(kinds[k]||0)+1; });
   body.innerHTML = `<div class="page-title storage-detail-title"><div><div class="eyebrow">STORAGE POOL</div><h2>${esc(storageName(s))}</h2></div><button class="btn ghost" id="storage-back">← All storage</button></div><div class="storage-detail-grid"><section class="card pool-readout"><div class="pool-top"><span><b>${esc(s.type || "storage")}</b><small>${esc(s.status || "unknown")}</small></span><strong>${pct}%</strong></div><div class="capacity large"><span style="width:${pct}%"></span></div><div class="pool-totals"><span><b>${bytes(used)}</b> used</span><span><b>${bytes(avail)}</b> free</span><span><b>${total ? bytes(total) : "—"}</b> total</span></div></section><section class="card"><h3>Contents</h3><div class="content-summary">${Object.entries(kinds).map(([k,n]) => `<span><b>${n}</b> ${esc(k)}</span>`).join("") || `<span class="sub">No volumes reported</span>`}</div></section></div><section class="card"><div class="section-heading"><h3>Stored items</h3><span class="sub">${rows.length} reported</span></div>${d.content_error ? `<p class="sub">Contents unavailable: ${esc(d.content_error)}</p>` : rows.length ? `<table class="storage-content"><thead><tr><th>Volume</th><th>Kind</th><th>Size</th><th>VMID</th><th>Format</th></tr></thead><tbody>${rows.map(r => `<tr><td class="mono">${esc(r.volid || r.name || "—")}</td><td>${esc(r.content || "—")}</td><td>${r.size ? bytes(r.size) : "—"}</td><td>${r.vmid || "—"}</td><td>${esc(r.format || "—")}</td></tr>`).join("")}</tbody></table>` : `<p class="sub">No stored items reported by this backend.</p>`}</section>`;
-  $("storage-back").addEventListener("click", loadStorage);
+  $("storage-back").addEventListener("click", () => showTab("vms"));
 }
 
 function bytes(n) {
@@ -788,7 +788,6 @@ $("btn-host-console").addEventListener("click", () => openTerminalPath("host", "
 $("save-settings").addEventListener("click", saveSettings);
 $("btn-refresh").addEventListener("click", () => {
   if ($("view-vms").classList.contains("hide") === false) loadVms();
-  else if ($("view-storage").classList.contains("hide") === false) loadStorage();
   else if ($("view-dashboard").classList.contains("hide") === false) loadDashboard();
   else if (currentVm) openVm(currentVm.name);
 });

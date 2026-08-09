@@ -21,19 +21,24 @@
 </section>
 <div id="app-shell">
   <aside id="sidebar">
-    <a class="brand" href="#dashboard"><span class="brand-mark">P</span><span>phase</span></a>
+    <a class="brand" href="#dashboard"><span class="brand-mark"><span>P</span></span><span>phase</span></a>
     <div class="node-pill"><span class="live"></span><span id="hostline">connecting…</span></div>
     <nav class="side-nav" aria-label="Console navigation">
-      <button data-view="dashboard">Overview</button>
-      <button data-view="vms">Inventory</button>
-      <button data-view="storage">Storage</button>
+      <button data-view="dashboard"><span class="nav-index">01</span><span>Overview</span></button>
+      <button data-view="vms"><span class="nav-index">02</span><span>Inventory</span></button>
     </nav>
     <div class="side-bottom">
-      <button class="btn create-nav" data-view="create">＋ Create VM</button>
-      <button data-view="settings">Settings</button>
-      <button class="nav-refresh" id="btn-refresh">↻ Refresh data</button>
+      <button class="btn create-nav" data-view="create">＋ <span>Create VM</span></button>
+      <button data-view="settings"><span class="nav-index">03</span><span>Settings</span></button>
+      <button class="nav-refresh" id="btn-refresh">↻ <span>Refresh data</span></button>
     </div>
   </aside>
+  <nav class="mobile-nav" aria-label="Console navigation">
+    <button data-view="dashboard"><span>◫</span>Overview</button>
+    <button data-view="vms"><span>▦</span>Inventory</button>
+    <button data-view="settings"><span>◌</span>Settings</button>
+  </nav>
+  <button class="mobile-create btn" data-view="create" aria-label="Create VM">＋</button>
   <section id="workspace">
     <header id="topbar"><div id="crumb">OVERVIEW</div><span class="spacer"></span><label id="plan-loader" class="hide">Load draft <select id="loadplan"></select></label></header>
 <div id="wrap">
@@ -186,10 +191,11 @@
         <tbody></tbody>
       </table>
     </div>
-    <div class="grid2"><div class="card"><h3>Templates</h3><div class="compact-list" id="inventory-templates"></div></div><div class="card"><h3>Storage</h3><div class="compact-list" id="inventory-storage"></div></div></div>
+    <div class="grid2"><div class="card"><h3>Templates</h3><div class="compact-list" id="inventory-templates"></div></div><div class="card inventory-note"><h3>Inventory map</h3><p class="sub">Machines, templates, and storage live here. Open a row to inspect it.</p></div></div>
+    <section class="inventory-storage-section"><div class="section-heading"><div><div class="eyebrow">CAPACITY</div><h3>Storage pools</h3></div><button class="btn ghost mini" id="btn-storage-refresh">↻ Refresh pools</button></div><div class="inventory-storage-grid" id="inventory-storage"></div></section>
   </main>
 
-  <!-- ================= STORAGE ================= -->
+  <!-- ================= STORAGE DETAIL (opened from inventory) ================= -->
   <main id="view-storage" class="hide">
     <div class="page-title"><h2>Storage <span class="sub" id="storage-count"></span></h2><button class="btn ghost" id="btn-storage-refresh">↻ Refresh pools</button></div>
     <div id="storage-body"></div>
