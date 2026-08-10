@@ -103,8 +103,8 @@ async function syncLive() {
   if (!view || document.hidden || liveSyncInFlight) return;
   liveSyncInFlight = true;
   try {
-    if (view === "dashboard") await loadDashboard();
-    else await loadVms({quiet:true});
+    if (view === "dashboard") await loadDashboard({live:true});
+    else await loadVms({quiet:true, live:true});
   } catch (e) { /* leave the current readout intact until the next tick */ }
   finally {
     liveSyncInFlight = false;
@@ -438,14 +438,15 @@ async function loadVms(opts) {
   const quiet = !!opts.quiet;
   $("vms-count").textContent = "";
   const tb = $("vms-table").querySelector("tbody");
-  if (!quiet) tb.innerHTML = `<tr><td colspan="7" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
-  let vms, host;
+  if (!quiet) tb.innerHTML = `<tr><td colspan="8" class="loadrow"><span class="spinner"></span>loading…</td></tr>`;
+  let vms, host, live = [];
   try {
-    [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
+    [vms, host, live] = await Promise.all([api("/api/vms"), api("/api/host"), opts.live ? api("/api/vms/live") : Promise.resolve([])]);
   } catch (e) {
-    if (!quiet) tb.innerHTML = `<tr><td colspan="7" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
+    if (!quiet) tb.innerHTML = `<tr><td colspan="8" class="loadrow">failed to load VMs — refresh to retry</td></tr>`;
     return;
   }
+  vms = mergeLiveVmStats(vms, live);
   tb.innerHTML = "";
   const machines = vms.filter(v => !v.template);
   const templates = vms.filter(v => v.template);
@@ -455,15 +456,15 @@ async function loadVms(opts) {
     const badge = v.template ? '<span class="badge template">template</span>'
       : `<span class="badge ${v.status}">${v.status}</span>`;
     tr.innerHTML = `<td class="click"><b>${v.name}</b></td><td>${v.vmid}</td>
-      <td>${badge}</td><td>${v.ip || "—"}</td><td>${v.cores || "—"}</td>
-      <td>${v.memory ? Math.round(v.memory / 1024) + " GB" : "—"}</td>
+      <td>${badge}</td><td>${v.ip || "—"}</td><td>${v.cores || "—"}</td><td>${vmCpu(v)}</td>
+      <td>${vmMemory(v)}</td>
       <td>${v.tags || "—"}</td>`;
     tr.addEventListener("click", () => openVm(v.name));
     tb.appendChild(tr);
   });
   $("inventory-templates").innerHTML = templates.map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>VMID ${v.vmid}</small></span><span class="badge template">template</span></button>`).join("") || `<span class="sub">No templates</span>`;
   $("inventory-templates").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
-  const storage = (host && host.storage) || [];
+  const storage = ((host && host.storage) || []).slice().sort((a, b) => storageName(a).localeCompare(storageName(b)));
   $("inventory-storage").innerHTML = storage.map(s => {
     const total = Number(s.total || 0), used = Number(s.used || 0);
     const pct = storagePercent(s);
@@ -479,13 +480,25 @@ function storagePercent(s) {
   return total ? Math.min(100, Math.round(100 * used / total)) : 0;
 }
 function storageName(s) { return s.storage || s.name || "—"; }
+function mergeLiveVmStats(vms, live) {
+  const byVmid = new Map((live || []).map(vm => [String(vm.vmid), vm]));
+  return (vms || []).map(vm => Object.assign({}, vm, byVmid.get(String(vm.vmid)) || {}));
+}
+function vmCpu(vm) {
+  const cpu = Number(vm.cpu);
+  return vm.status === "running" && Number.isFinite(cpu) ? `${Math.round(cpu * 100)}%` : "—";
+}
+function vmMemory(vm) {
+  const used = Number(vm.mem_used), total = Number(vm.mem_total);
+  return vm.status === "running" && Number.isFinite(used) && Number.isFinite(total) && total > 0 ? `${bytes(used)} / ${bytes(total)}` : "—";
+}
 async function loadStorage() {
   const body = $("storage-body");
   body.innerHTML = `<div class="card loadrow"><span class="spinner"></span>loading storage pools…</div>`;
   let host;
   try { host = await api("/api/host"); }
   catch (e) { body.innerHTML = `<div class="card loadrow">Storage data unavailable — refresh to retry.</div>`; return; }
-  const pools = host.storage || [];
+  const pools = (host.storage || []).slice().sort((a, b) => storageName(a).localeCompare(storageName(b)));
   $("storage-count").textContent = pools.length ? `(${pools.length} pools)` : "";
   const used = pools.reduce((n, s) => n + Number(s.used || 0), 0);
   const total = pools.reduce((n, s) => n + Number(s.total || 0), 0);
@@ -528,9 +541,11 @@ function renderCapacities(el, markup) {
     requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = to; }));
   });
 }
-async function loadDashboard() {
-  const [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
+async function loadDashboard(opts) {
+  opts = opts || {};
+  let [vms, host, live] = await Promise.all([api("/api/vms"), api("/api/host"), opts.live ? api("/api/vms/live") : Promise.resolve([])]);
   if (!Array.isArray(vms)) return toast(vms.error || "Could not load overview", "err");
+  vms = mergeLiveVmStats(vms, live);
   const machines = vms.filter(v => !v.template);
   const active = machines.filter(v => v.status === "running").length;
   const templates = vms.filter(v => v.template).length;
@@ -538,7 +553,7 @@ async function loadDashboard() {
   const load = Array.isArray(s.loadavg) ? s.loadavg[0] : s.loadavg;
   const cpuCount = s.cpuinfo && s.cpuinfo.cpus;
   $("dashboard-metrics").innerHTML = metric("Machines", machines.length, "") + metric("Running", active, "") + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", cpuCount ? `${cpuCount} logical CPUs · load ${Number(load || 0).toFixed(2)}` : "") + metric("Memory", bytes(m.used), m.total ? `${Math.round(100 * m.used / m.total)}% of ${bytes(m.total)}` : "") + metric("Root filesystem", bytes(root.used), root.total ? `${Math.round(100 * root.used / root.total)}% used` : "") + metric("Templates", templates, "");
-  $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
+  $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}${v.template ? "" : ` · CPU ${vmCpu(v)} · MEM ${vmMemory(v)}`}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
   $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
   renderCapacities($("dashboard-host"), host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="util-line"><span>CPU</span><div class="capacity"><span data-meter="host-cpu" style="width:${Math.min(100, 100 * Number(s.cpu || 0))}%"></span></div><b>${Math.round(100 * Number(s.cpu || 0))}%</b></div><div class="util-line"><span>Memory</span><div class="capacity"><span data-meter="host-memory" style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><b>${m.total ? Math.round(100 * m.used / m.total) : 0}%</b></div><div class="util-line"><span>Root</span><div class="capacity"><span data-meter="host-root" style="width:${root.total ? Math.min(100, 100 * (root.used || 0) / root.total) : 0}%"></span></div><b>${root.total ? Math.round(100 * root.used / root.total) : 0}%</b></div>`);
   renderCapacities($("dashboard-storage"), (host.storage || []).map(x => { const total=Number(x.total||0), used=Number(x.used||0), pct=total?Math.min(100,100*used/total):0, name=esc(x.storage || x.name || "—"); return `<div class="storage-bar"><span><b>${name}</b><small>${esc(x.type || "storage")} · ${esc(x.status || "unknown")}</small></span><div class="capacity"><span data-meter="storage-${name}" style="width:${pct}%"></span></div><span>${total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable"}</span></div>`; }).join("") || "<span class=\"sub\">No storage data.</span>");
@@ -605,7 +620,8 @@ function renderDetail(vm) {
   $("detail-status").textContent = vm.template ? "template" : vm.status;
   $("detail-ip").textContent = vm.ip ? "· " + vm.ip : "";
 
-  const disks = vm.disks.map(d => `${d.id} (${d.size || d.volume || "?"}${d.role === "system" ? " · system image" : ""})`).join("<br>") || "—";
+  const disks = sortVmDisks(vm.disks);
+  const diskSummary = disks.map(d => `${d.id} (${d.size || d.volume || "?"}${d.role === "system" ? " · system image" : ""})`).join("<br>") || "—";
   const body = $("detail-body");
   body.innerHTML = `
   <div class="grid2">
@@ -626,7 +642,7 @@ function renderDetail(vm) {
         <span class="k">vCPU</span><span class="v">${vm.cores || "—"}</span>
         <span class="k">Memory</span><span class="v">${vm.memory ? Math.round(vm.memory / 1024) + " GB" : "—"}</span>
         <span class="k">Network</span><span class="v">${vm.net0 || "—"}</span>
-        <span class="k">Disks</span><span class="v">${disks}</span>
+        <span class="k">Disks</span><span class="v">${diskSummary}</span>
         <span class="k">On boot</span><span class="v">${vm.onboot === "1" ? "yes" : "no"}</span>
         <span class="k">Protected</span><span class="v">${vm.protection === "1" ? "yes" : "no"}</span>
         <span class="k">Description</span><span class="v">${vm.description || "—"}</span>
@@ -634,6 +650,9 @@ function renderDetail(vm) {
     </div>
   </div>
 
+  <details class="management-panel">
+    <summary><span>Manage hardware</span><small>Edit VM settings, attach or resize disks</small></summary>
+    <div class="management-content">
   <div class="card">
     <h3>Edit</h3>
     <div class="row">
@@ -651,7 +670,7 @@ function renderDetail(vm) {
     <h3>Disks</h3>
     <table id="d-table" class="disk-table"><thead><tr><th>Device</th><th>Capacity</th><th>Storage</th><th>Volume</th><th></th></tr></thead>
       <tbody>
-        ${vm.disks.map(d => `
+        ${disks.map(d => `
         <tr>
           <td><b>${d.id}</b><small>${d.role === "system" ? `System image${d.image ? " · " + esc(d.image) : ""}` : (d.bus || d.id.replace(/\d+$/, ""))}</small></td>
           <td>${d.size || "—"}</td><td>${d.storage || "—"}</td><td class="disk-volume">${d.volume || "—"}</td>
@@ -666,6 +685,9 @@ function renderDetail(vm) {
       <button class="btn ghost" id="d-add">＋ Attach disk</button>
     </div>
   </div>
+
+    </div>
+  </details>
 
   <div class="grid2">
     <div class="card">
@@ -725,8 +747,18 @@ function diskBusOptions() {
   return [["SCSI", "scsi"], ["SATA", "sata"], ["VirtIO", "virtio"], ["IDE", "ide"]]
     .map(([label, value]) => `<option value="${value}">${label}</option>`).join("");
 }
+function sortVmDisks(disks) {
+  const rank = {scsi:0, sata:1, virtio:2, ide:3};
+  return (disks || []).slice().sort((a, b) => {
+    const aBus = a.bus || String(a.id).replace(/\d+$/, "");
+    const bBus = b.bus || String(b.id).replace(/\d+$/, "");
+    const aIndex = Number((String(a.id).match(/\d+$/) || ["0"])[0]);
+    const bIndex = Number((String(b.id).match(/\d+$/) || ["0"])[0]);
+    return (rank[aBus] ?? 99) - (rank[bBus] ?? 99) || aIndex - bIndex || String(a.id).localeCompare(String(b.id));
+  });
+}
 function storageOptions() {
-  const storages = (meta && meta.storages) || [];
+  const storages = ((meta && meta.storages) || []).slice().sort((a, b) => a.localeCompare(b));
   return `<option value="">Select storage</option>` + storages.map(s => `<option value="${esc(s)}">${esc(s)}</option>`).join("");
 }
 function nextDiskId(vm, bus) {

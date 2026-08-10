@@ -16,6 +16,7 @@ Endpoints (all /api/* require X-Phase-Token when a token is configured):
   GET  /api/plans/<name>  -> full saved plan
   GET  /api/task/<id>     -> async task status (running|done|error)
   GET  /api/vms           -> VM list
+  GET  /api/vms/live      -> lightweight VM CPU/memory/status telemetry
   GET  /api/vms/<name>    -> VM detail (config, disks, status, ip)
   GET  /api/vms/<name>/snapshots
   GET  /api/vms/<name>/firewall     (runs ufw status in the guest)
@@ -138,6 +139,7 @@ def _host_detail(qm) -> dict:
         node = qm.node() if hasattr(qm, "node") else os.uname().nodename
         status = qm.pvesh(f"/nodes/{node}/status") or {}
         storage = qm.pvesh(f"/nodes/{node}/storage") or []
+        storage = sorted(storage, key=lambda row: str(row.get("storage", row.get("name", ""))).casefold())
         return {"node": node, "status": status, "storage": storage}
     except Exception as e:  # host telemetry should not break the console
         return {"node": "", "status": {}, "storage": [], "error": str(e)}
@@ -159,8 +161,22 @@ def _storage_detail(qm, name: str) -> dict:
         content, content_error = [], str(e)
     else:
         content_error = ""
+    content = sorted(content, key=lambda row: str(row.get("volid", row.get("name", ""))).casefold())
     return {"storage": storage, "content": content,
             "content_error": content_error}
+
+
+def _live_vm_stats(qm) -> list[dict]:
+    """Small PVE resource read for the browser's live VM telemetry lane."""
+    rows = []
+    for vm in qm.list_vms():
+        rows.append({
+            "vmid": vm.get("vmid"), "name": vm.get("name", ""),
+            "status": vm.get("status", "unknown"), "cpu": vm.get("cpu"),
+            "mem_used": vm.get("mem") if vm.get("maxmem") is not None else None,
+            "mem_total": vm.get("maxmem"),
+        })
+    return sorted(rows, key=lambda row: (int(row["vmid"] or 0), str(row["name"]).casefold()))
 
 
 _EDITABLE_SETTINGS = {
@@ -328,6 +344,9 @@ def _vm_detail(cfg, qm, name: str) -> dict:
                 "role": "system" if k == system_disk_id else "data",
                 "image": provenance.get("image", "") if k == system_disk_id else "",
             })
+    bus_order = {"scsi": 0, "sata": 1, "virtio": 2, "ide": 3}
+    disks.sort(key=lambda disk: (bus_order.get(disk["bus"], 99),
+                                 int(__import__("re").search(r"\d+$", disk["id"]).group(0))))
     return {
         "vmid": vmid,
         "name": name,
@@ -610,6 +629,8 @@ def make_handler(cfg, qm, token: str = ""):
                 return self._json(_cached_meta(cfg, qm))
             if path == "/api/host":
                 return self._json(_host_detail(qm))
+            if path == "/api/vms/live":
+                return self._json(_live_vm_stats(qm))
             if path.startswith("/api/storage/"):
                 name = path[len("/api/storage/"):]
                 try:

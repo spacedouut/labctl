@@ -371,6 +371,8 @@ def test_web_api():
     # --- vm management ---
     vms = get("/api/vms")
     check("web vms list", any(v["name"] == "webvm1" for v in vms))
+    live_vms = get("/api/vms/live")
+    check("web live VM telemetry", any(v["name"] == "webvm1" and "status" in v for v in live_vms))
     detail = get("/api/vms/webvm1")
     check("web vm detail", detail["cores"] == "2" and len(detail["disks"]) == 2)
     check("web vm detail does not invent boot disk", "os" not in detail["disks"][0])

@@ -334,6 +334,9 @@ def all_vms(qm, cfg) -> list[dict]:
             "tags": conf.get("tags", ""),
             "cores": conf.get("cores", ""),
             "memory": conf.get("memory", ""),
+            "cpu": v.get("cpu"),
+            "mem_used": v.get("mem") if v.get("maxmem") is not None else None,
+            "mem_total": v.get("maxmem"),
             "template": conf.get("template") == "1",
         })
-    return rows
+    return sorted(rows, key=lambda row: (int(row["vmid"]), row["name"].casefold()))
