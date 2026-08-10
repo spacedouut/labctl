@@ -1,0 +1,38 @@
+{
+  "default_user": "ubuntu",
+  "naming": {
+    "pattern": "^[a-z][a-z0-9-]*$",
+    "max_length": 63,
+    "env_separator": "-"
+  },
+  "networks": {
+    "lan": ["192.168.0.0/16"],
+    "mgmt": ["10.0.0.0/8"]
+  },
+  "templates": {
+    "prefix": "tpl",
+    "separator": "-",
+    "sizes": {
+      "micro": {"cores": 1, "memory": 1024},
+      "small": {"cores": 2, "memory": 2048},
+      "standard": {"cores": 2, "memory": 4096},
+      "medium": {"cores": 4, "memory": 6144},
+      "large": {"cores": 4, "memory": 8192}
+    }
+  },
+  "bootstrap": {
+    "directory": "tests/fixtures/bootstrap",
+    "os_overrides": {
+      "ubuntu-26": {"system": "ubuntu/initialize_system.sh"}
+    }
+  },
+  "vm": {
+    "agent": true,
+    "ssh_keys": []
+  },
+  "notify": {"enabled": false},
+  "backup": {"storage": "nas", "mode": "snapshot", "compress": "zstd"},
+  "engine": {
+    "jobs": []
+  }
+}

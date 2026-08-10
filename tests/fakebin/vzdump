@@ -1,0 +1,7 @@
+#!/usr/bin/env python3
+"""Fake vzdump — pretend to back up a VM."""
+import sys
+
+print("INFO: Starting Backup of VM %s" % sys.argv[1])
+print("INFO: Finished Backup of VM %s" % sys.argv[1])
+sys.exit(0)

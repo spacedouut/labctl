@@ -1,8 +1,8 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/spacedouut/phase/config.schema.json",
-  "title": "phase configuration",
-  "description": "Configuration schema for phase — a CLI tool for managing Proxmox VE virtual machines",
+  "title": "phase configuration (v4)",
+  "description": "Configuration schema for phase — a CLI for managing Proxmox VE virtual machines",
 
   "type": "object",
   "additionalProperties": false,
@@ -10,169 +10,190 @@
 
   "properties": {
     "default_user": {
-      "description": "SSH user used when a VM's cloud-init ciuser is not set. VMs created from phase templates inherit ciuser from the template",
+      "description": "SSH user used when a VM's cloud-init ciuser is not set",
       "type": "string",
-      "default": "root",
-      "examples": ["ubuntu", "root"]
+      "default": "root"
+    },
+
+    "default_storage": {
+      "description": "Storage used for data disks when --storage is omitted",
+      "type": "string"
     },
 
     "naming": {
-      "description": "Naming conventions for VMs and resources. Names are auto-validated against these rules",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "pattern": {
-          "description": "Regex pattern that all VM and service names must match (alphanumeric, lowercase, hyphens only)",
-          "type": "string",
-          "default": "^[a-z][a-z0-9-]*$",
-          "examples": ["^[a-z][a-z0-9-]*$"]
-        },
-        "max_length": {
-          "description": "Maximum length for VM names (env-service-instance)",
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 255,
-          "default": 63
-        },
-        "env_separator": {
-          "description": "Separator between env, service, and instance in VM names",
-          "type": "string",
-          "default": "-",
-          "examples": ["-", "_", "."]
-        }
+        "pattern": { "type": "string", "default": "^[a-z][a-z0-9-]*$" },
+        "max_length": { "type": "integer", "minimum": 1, "maximum": 255, "default": 63 },
+        "env_separator": { "type": "string", "default": "-" }
       }
     },
 
     "networks": {
-      "description": "Network alias definitions. Each alias maps to one or more CIDR ranges. Aliases are used in firewall rules (--from <alias>) and for auto-detecting the best IP for SSH connections",
+      "description": "Network aliases: name → CIDR list. Used by firewall rules (--from <alias>) and best-IP selection",
       "type": "object",
       "additionalProperties": {
         "type": "array",
         "minItems": 1,
-        "items": {
-          "type": "string",
-          "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$",
-          "description": "CIDR notation (e.g. 192.168.1.0/24)"
-        }
-      },
-      "examples": [
-        {
-          "lan": ["192.168.0.0/16"],
-          "mgmt": ["10.0.0.0/8"]
-        }
-      ]
+        "items": { "type": "string", "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$" }
+      }
     },
 
     "templates": {
-      "description": "Proxmox template VM conventions. Defines how templates are named and what resource sizes are available",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "prefix": {
-          "description": "Prefix for template VM names",
-          "type": "string",
-          "default": "tpl"
-        },
-        "separator": {
-          "description": "Separator between prefix, size, and OS in template names",
-          "type": "string",
-          "default": "-"
-        },
+        "prefix": { "type": "string", "default": "tpl" },
+        "separator": { "type": "string", "default": "-" },
         "sizes": {
-          "description": "Available VM resource sizes. Validates --size against these definitions",
+          "description": "Machine-type presets (cores/memory MB). `--size auto` derives from the template instead",
           "type": "object",
           "additionalProperties": {
             "type": "object",
             "additionalProperties": false,
             "required": ["cores", "memory"],
             "properties": {
-              "cores": {
-                "description": "Number of vCPUs",
-                "type": "integer",
-                "minimum": 1,
-                "examples": [1, 2, 4, 8]
-              },
-              "memory": {
-                "description": "Memory in MB",
-                "type": "integer",
-                "minimum": 128,
-                "examples": [1024, 2048, 4096, 8192]
-              }
+              "cores": { "type": "integer", "minimum": 1 },
+              "memory": { "type": "integer", "minimum": 128 }
             }
-          },
-          "examples": [
-            {
-              "micro": { "cores": 1, "memory": 1024 },
-              "small": { "cores": 2, "memory": 2048 }
-            }
-          ]
+          }
         }
       }
     },
 
     "bootstrap": {
-      "description": "Bootstrap script configuration. Scripts are uploaded to the VM via QEMU Guest Agent and executed with sudo. Per-OS overrides take precedence for the matching OS",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "directory": {
-          "description": "Base directory containing bootstrap scripts. Used as root for relative paths in os_overrides",
-          "type": "string",
-          "default": "/opt/labctl/bootstrap",
-          "examples": ["/opt/phase/bootstrap", "/opt/labctl/bootstrap"]
-        },
+        "directory": { "type": "string", "default": "/opt/phase/bootstrap" },
         "os_overrides": {
-          "description": "Per-OS bootstrap script paths. Keys match --os values. Paths are relative to bootstrap.directory",
           "type": "object",
           "additionalProperties": {
             "type": "object",
-            "additionalProperties": {
-              "type": "string",
-              "description": "Path to the OS-specific script (relative to bootstrap.directory)"
-            }
-          },
-          "examples": [
-            {
-              "ubuntu-24-04-lts": { "system": "ubuntu/initialize_system.sh" },
-              "debian-12": { "system": "debian/initialize_system.sh" }
-            }
-          ]
+            "additionalProperties": { "type": "string" }
+          }
         }
       }
     },
 
     "vm": {
-      "description": "Default VM behaviour settings",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "agent": {
-          "description": "Whether the QEMU Guest Agent should be enabled by default on new VMs",
-          "type": "boolean",
-          "default": true
-        },
+        "agent": { "type": "boolean", "default": true },
         "ssh_keys": {
-          "description": "SSH public keys injected into every new VM's cloud-init, merged with (and deduped against) keys inherited from the template. Each entry is either a path to a .pub file or a literal public-key string.",
+          "description": "SSH public keys injected into every new VM (path to .pub or literal key). Managed via `phase ssh-key`",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "web": {
+      "description": "Phase web-console authentication and session settings",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "token": { "description": "Legacy shared access token; use PAM mode for named users", "type": "string" },
+        "auth": { "description": "Authentication mode", "enum": ["none", "token", "pam"] },
+        "pam_users": { "description": "Explicit allowlist of Proxmox PAM users permitted to administer Phase", "type": "array", "items": { "type": "string", "pattern": ".+@pam$" }, "uniqueItems": true },
+        "session_ttl_hours": { "description": "PAM web-session lifetime (1-168 hours)", "type": "integer", "minimum": 1, "maximum": 168, "default": 12 },
+        "live_sync_seconds": { "description": "Browser telemetry refresh cadence in seconds", "type": "integer", "minimum": 1, "maximum": 60, "default": 2 }
+      }
+    },
+
+    "gpus": {
+      "description": "Optional static GPU/mdev overrides: gpus.<mdev-type>.pci pins a PCI address. Auto-discovered by `phase engine scan` otherwise",
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "pci": { "type": "string", "pattern": "^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\\.[0-9a-fA-F]$" } }
+      }
+    },
+
+    "remote": {
+      "description": "Run phase from a different machine: tunnel qm/pvesh over SSH. Also settable via --host / PHASE_HOST",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "host": { "type": "string" } }
+    },
+
+    "notify": {
+      "description": "Push notifications for long operations. Requires the [notify] extra (apprise)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean", "default": false },
+        "urls": {
+          "description": "Apprise URLs (e.g. discord://..., telegram://..., ntfy://...)",
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "api": {
+      "description": "Proxmox REST API credentials for the [api] extra transport (falls back to qm CLI when absent)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string" },
+        "node": { "type": "string" },
+        "token_id": { "type": "string" },
+        "token_secret": { "type": "string" },
+        "verify_ssl": { "type": "boolean", "default": true }
+      }
+    },
+
+    "backup": {
+      "description": "vzdump defaults for `phase vm <name> backup`",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storage": { "type": "string", "default": "local" },
+        "mode": { "enum": ["snapshot", "suspend", "stop"], "default": "snapshot" },
+        "compress": { "enum": ["zstd", "gzip", "lzo", "none"], "default": "zstd" }
+      }
+    },
+
+    "engine": {
+      "description": "The engine daemon (phase engine daemon / systemd service)",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "jobs": {
+          "description": "Scheduled jobs run by the daemon",
           "type": "array",
           "items": {
-            "type": "string",
-            "description": "Path to a .pub file (e.g. /root/.ssh/id_ed25519.pub) or a literal 'ssh-... ' key string"
-          },
-          "examples": [["/root/.ssh/id_ed25519.pub"]]
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "interval_seconds", "command"],
+            "properties": {
+              "name": { "type": "string" },
+              "interval_seconds": { "type": "number", "minimum": 1 },
+              "command": { "type": "array", "items": { "type": "string" } },
+              "enabled": { "type": "boolean", "default": true }
+            }
+          }
+        },
+        "systemd": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "unit": { "type": "string", "default": "/etc/systemd/system/phase-engine.service" }
+          }
         }
       }
     },
 
     "ui": {
-      "description": "UI and interactivity preferences",
+      "description": "UI preferences",
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "confirm_destructive": {
-          "description": "Require explicit confirmation before destructive operations (destroy, reset)",
-          "type": "boolean",
-          "default": true
-        }
+        "confirm_destructive": { "type": "boolean", "default": true }
       }
     }
   }

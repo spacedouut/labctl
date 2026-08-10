@@ -1,0 +1,32 @@
+[project]
+name = "phase"
+version = "0.4.0.dev0"
+description = "GCP Compute Engine-style VM management for Proxmox VE"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "spacedouut" }]
+# Core is pure-stdlib: no mandatory dependencies.
+dependencies = []
+
+[project.optional-dependencies]
+# Optional extras — copyparty-style: the CLI works fully without them,
+# installing one (or more) unlocks extra features.
+tui = ["textual>=0.60", "rich>=13.7"]        # menu-driven terminal UI
+notify = ["apprise>=1.8"]                    # push notifications on long ops
+report = ["jinja2>=3.1"]                     # HTML inventory/status reports
+api = ["proxmoxer>=2.0"]                     # Proxmox REST transport (fallback: qm CLI)
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+phase = "phase.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["phase"]
+
+[tool.uv]
+package = true

@@ -1,0 +1,11 @@
+#!/usr/bin/env python3
+"""Fake pvesm — storage status."""
+import sys
+
+print("""\
+  Name             Type     Status           Total            Used       Available        %
+  local            dir      active        100000000        2000000        98000000   2.00%
+  local-lvm        lvmthin  active        500000000      100000000       400000000  20.00%
+  nas              nfs      active       1000000000      300000000       700000000  30.00%
+""")
+sys.exit(0)

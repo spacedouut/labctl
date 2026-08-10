@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>phase · VM console</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/xterm.css">
+</head>
+<body>
+<section id="login-screen" class="hide" aria-labelledby="login-title">
+  <form id="login-form" class="login-card">
+    <div class="login-mark">P</div>
+    <div><p class="eyebrow">PHASE CONSOLE</p><h1 id="login-title">Sign in</h1><p id="login-copy">Use your Proxmox PAM account.</p></div>
+    <label>Username<input id="login-user" autocomplete="username" placeholder="name@pam" required></label>
+    <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" class="login-error" role="alert"></p>
+    <button class="btn" type="submit">Sign in</button>
+  </form>
+</section>
+<div id="app-shell">
+  <aside id="sidebar">
+    <a class="brand" href="#dashboard"><span class="brand-mark"><span>P</span></span><span>phase</span></a>
+    <div class="node-pill"><span class="live"></span><span id="hostline">connecting…</span></div>
+    <nav class="side-nav" aria-label="Console navigation">
+      <button data-view="dashboard"><span class="nav-index">01</span><span>Overview</span></button>
+      <button data-view="vms"><span class="nav-index">02</span><span>Inventory</span></button>
+    </nav>
+    <div class="side-bottom">
+      <button class="btn create-nav" data-view="create">＋ <span>Create VM</span></button>
+      <button data-view="settings"><span class="nav-index">03</span><span>Settings</span></button>
+      <button class="nav-refresh" id="btn-refresh">↻ <span>Refresh data</span></button>
+    </div>
+  </aside>
+  <nav class="mobile-nav" aria-label="Console navigation">
+    <button data-view="dashboard"><span>◫</span>Overview</button>
+    <button data-view="vms"><span>▦</span>Inventory</button>
+    <button data-view="settings"><span>◌</span>Settings</button>
+  </nav>
+  <button class="mobile-create btn" data-view="create" aria-label="Create VM">＋</button>
+  <section id="workspace">
+<div id="wrap">
+
+  <!-- ================= OVERVIEW ================= -->
+  <main id="view-dashboard">
+    <div class="page-title"><h2>Overview</h2><span><button class="btn ghost" id="btn-host-console">⌨ Host console</button> <button class="btn" data-view="create">＋ Create VM</button></span></div>
+    <div class="metric-grid" id="dashboard-metrics"></div>
+    <div class="grid2"><div class="card"><h3>Machines</h3><div id="dashboard-vms" class="compact-list"></div></div><div class="card"><h3>Host utilization</h3><div id="dashboard-host" class="host-readout">loading…</div></div></div>
+    <div class="card"><h3>Storage</h3><div id="dashboard-storage" class="storage-bars"></div></div>
+  </main>
+
+  <!-- ================= CREATE ================= -->
+  <main id="view-create" class="hide">
+    <div class="page-title create-page-title"><h2>Create VM</h2><label id="plan-loader">Load draft <select id="loadplan"></select></label></div>
+    <div class="create-wrap">
+      <nav class="stepper" id="stepper"></nav>
+      <div class="panes">
+    <div id="pane-machine" class="pane">
+      <h2>Machine configuration</h2>
+      <div class="card">
+        <h3>Basics</h3>
+        <div class="row">
+          <div class="field"><label>Name</label>
+            <input type="text" id="f-name" placeholder="e.g. postgres" spellcheck="false"></div>
+          <div class="field" style="flex:1"><label>Description</label>
+            <input type="text" id="f-desc" placeholder="optional" spellcheck="false"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Size preset</h3>
+        <div class="chips" id="size-chips"></div>
+      </div>
+      <div class="card">
+        <h3>Overrides <span style="text-transform:none;color:var(--muted)">(blank = size default)</span></h3>
+        <div class="row">
+          <div class="field"><label>vCPUs</label><input type="number" id="f-cores" min="1" placeholder="auto"></div>
+          <div class="field"><label>Memory (MB)</label><input type="number" id="f-memory" min="128" placeholder="auto"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>System image</h3>
+        <div class="field"><label>Image</label><select id="f-os"></select></div>
+      </div>
+    </div>
+
+    <div id="pane-disks" class="pane hide">
+      <h2>Disks</h2>
+      <div class="card">
+        <h3>Additional disks</h3>
+        <table id="disk-table">
+          <thead><tr><th>ID</th><th>Size</th><th>Storage</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="row disk-addrow">
+          <select id="disk-new-bus"><option value="scsi">SCSI</option><option value="sata">SATA</option><option value="virtio">VirtIO</option><option value="ide">IDE</option></select>
+          <input type="text" id="disk-new-size" placeholder="size (50G)" spellcheck="false">
+          <select id="disk-new-storage"></select>
+          <button class="btn ghost" id="disk-add">＋ Add disk</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="pane-network" class="pane hide">
+      <h2>Network</h2>
+      <div class="card">
+        <div class="row">
+          <div class="field"><label>Bridge</label><select id="f-bridge"></select></div>
+          <div class="field"><label>VLAN tag</label>
+            <input type="text" id="f-vlan" placeholder="blank = none" spellcheck="false"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3>IP mode</h3>
+        <label class="radio"><input type="radio" name="ipmode" value="dhcp" checked> DHCP</label>
+        <label class="radio"><input type="radio" name="ipmode" value="static"> Static</label>
+        <div class="row" id="static-fields" style="margin-top:10px">
+          <div class="field"><label>IP address</label>
+            <input type="text" id="f-ip" placeholder="10.10.1.50/24" spellcheck="false"></div>
+          <div class="field"><label>Gateway</label>
+            <input type="text" id="f-gw" placeholder="10.10.1.1" spellcheck="false"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="pane-others" class="pane hide">
+      <h2>Others</h2>
+      <div class="card">
+        <div class="row">
+          <div class="field" style="flex:1"><label>Tags <span class="req">(comma separated)</span></label>
+            <input type="text" id="f-tags" placeholder="db,prod" spellcheck="false"></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-onboot" checked> Start on boot</label>
+        <label class="toggle"><input type="checkbox" id="f-protect"> Protected (no accidental destroy)</label>
+      </div>
+      <div class="card">
+        <h3>Firmware & devices</h3>
+        <div class="row">
+          <div class="field"><label>Firmware</label><select id="f-firmware"><option value="bios">Legacy BIOS</option><option value="uefi">UEFI</option></select></div>
+          <div class="field"><label>Display</label><select id="f-display"><option value="default">Template default</option><option value="std">Standard VGA</option><option value="virtio">VirtIO-GPU</option><option value="serial0">Serial console</option><option value="none">None</option></select></div>
+          <div class="field"><label>Audio</label><select id="f-audio"><option value="none">None</option><option value="intel-hda">Intel HDA</option><option value="ich9-intel-hda">ICH9 Intel HDA</option><option value="AC97">AC97</option></select></div>
+        </div>
+        <label class="toggle"><input type="checkbox" id="f-secureboot"> Secure Boot</label>
+        <label class="toggle"><input type="checkbox" id="f-tpm"> TPM 2.0</label>
+        <div class="row" id="hardware-storage"><div class="field"><label>UEFI disk storage</label><select id="f-efi-storage"></select></div><div class="field"><label>TPM storage</label><select id="f-tpm-storage"></select></div></div>
+      </div>
+      <div class="card">
+        <h3>GPU</h3>
+        <div class="field"><label>mdev UUID <span class="hint">(manual)</span></label>
+          <input type="text" id="f-gpu" placeholder="e.g. nvidia-223" spellcheck="false"></div>
+      </div>
+      <div class="card">
+        <h3>Bootstrap steps</h3>
+        <label class="toggle"><input type="checkbox" id="f-bs-system"> system (apt upgrade, ufw, fail2ban)</label>
+        <label class="toggle"><input type="checkbox" id="f-bs-docker"> docker</label>
+        <label class="toggle"><input type="checkbox" id="f-bs-tailscale"> tailscale</label>
+      </div>
+      <div class="card">
+        <h3>SSH key</h3>
+        <div class="field"><label>From the config pool</label><select id="f-sshkey"></select></div>
+      </div>
+    </div>
+      </div>
+      <aside class="rail">
+        <div class="rail-card">
+          <div class="rail-title"><span class="live"></span>Plan</div>
+          <div id="rail-plan"></div>
+          <details>
+            <summary>Equivalent command</summary>
+            <pre id="rail-cmd"></pre>
+          </details>
+          <div id="errors"></div>
+          <div class="rail-actions">
+            <button class="btn" id="act-create">⚙  Create</button>
+            <button class="btn" id="act-provision">🚀 Create + provision</button>
+            <button class="btn ghost" id="act-save">💾 Save plan only</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <!-- ================= INVENTORY ================= -->
+  <main id="view-vms" class="hide">
+    <div class="page-title"><h2>Inventory <span class="sub" id="vms-count"></span></h2><button class="btn" data-view="create">＋ Create VM</button></div>
+    <div class="card">
+      <h3>Virtual machines</h3>
+      <table id="vms-table">
+        <thead><tr><th>Name</th><th>VMID</th><th>Status</th><th>IP</th>
+          <th>vCPU</th><th>CPU</th><th>Memory</th><th>Tags</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="grid2"><div class="card"><h3>Templates</h3><div class="compact-list" id="inventory-templates"></div></div><div class="card inventory-note"><h3>Inventory map</h3><p class="sub">Machines, templates, and storage live here. Open a row to inspect it.</p></div></div>
+    <section class="inventory-storage-section"><div class="section-heading"><div><div class="eyebrow">CAPACITY</div><h3>Storage pools</h3></div><button class="btn ghost mini" id="btn-storage-refresh">↻ Refresh pools</button></div><div class="inventory-storage-grid" id="inventory-storage"></div></section>
+  </main>
+
+  <!-- ================= STORAGE DETAIL (opened from inventory) ================= -->
+  <main id="view-storage" class="hide">
+    <div class="page-title"><h2>Storage <span class="sub" id="storage-count"></span></h2><button class="btn ghost" id="btn-storage-refresh">↻ Refresh pools</button></div>
+    <div id="storage-body"></div>
+  </main>
+
+  <!-- ================= VM DETAIL ================= -->
+  <main id="view-detail" class="hide">
+    <div id="detail-top">
+      <h2 id="detail-name"></h2>
+      <span class="badge" id="detail-status"></span>
+      <span class="sub" id="detail-ip"></span>
+      <span class="spacer"></span>
+      <button class="btn" id="btn-ssh">⌨ SSH</button>
+      <button class="btn ghost" id="btn-serial">▣ Serial</button>
+      <button class="btn ghost" id="btn-back">← VMs</button>
+    </div>
+    <div id="detail-body"></div>
+  </main>
+
+  <!-- ================= SETTINGS ================= -->
+  <main id="view-settings" class="hide">
+    <div class="page-title"><h2>Settings</h2></div>
+    <div class="card settings-card"><h3>VM defaults</h3><div class="row"><div class="field"><label>Default SSH user</label><input id="s-default-user" spellcheck="false"></div><div class="field"><label>Default bridge</label><input id="s-default-bridge" spellcheck="false"></div><div class="field"><label>Default storage</label><input id="s-default-storage" spellcheck="false"></div><div class="field"><label>Backup storage</label><input id="s-backup-storage" spellcheck="false"></div></div><label class="toggle"><input type="checkbox" id="s-vm-agent"> Enable QEMU guest agent on created VMs</label><div class="actions"><button class="btn" id="save-settings">Save settings</button></div></div>
+    <div class="card settings-card"><h3>Live telemetry</h3><div class="row"><div class="field"><label>Telemetry cadence (seconds)</label><input id="s-live-sync-seconds" type="number" min="1" max="60" step="1" inputmode="numeric" required><span class="hint">Overview and inventory refresh while this tab is open. Two seconds is the default.</span></div></div><div class="actions"><button class="btn" id="save-settings-telemetry">Save telemetry</button></div></div>
+    <div class="card settings-card"><h3>Console access</h3><p class="sub" id="auth-summary"></p><div class="actions"><button class="btn ghost" id="reset-token">Rotate access token</button><button class="btn ghost" id="forget-token">Forget this browser’s token</button><button class="btn ghost hide" id="logout">Sign out</button></div></div>
+  </main>
+</div>
+</div></section></div>
+
+<div id="toast"></div>
+
+<script src="/static/xterm.js"></script>
+<script src="/static/xterm-addon-fit.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>
