@@ -40,7 +40,6 @@
   </nav>
   <button class="mobile-create btn" data-view="create" aria-label="Create VM">＋</button>
   <section id="workspace">
-    <header id="topbar"><div id="crumb">OVERVIEW</div><span class="spacer"></span><span id="live-sync" class="live-sync" role="status" aria-live="polite">LIVE · waiting</span><label id="plan-loader" class="hide">Load draft <select id="loadplan"></select></label></header>
 <div id="wrap">
 
   <!-- ================= OVERVIEW ================= -->
@@ -53,6 +52,7 @@
 
   <!-- ================= CREATE ================= -->
   <main id="view-create" class="hide">
+    <div class="page-title create-page-title"><h2>Create VM</h2><label id="plan-loader">Load draft <select id="loadplan"></select></label></div>
     <div class="create-wrap">
       <nav class="stepper" id="stepper"></nav>
       <div class="panes">

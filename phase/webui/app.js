@@ -85,8 +85,6 @@ function showTab(tab) {
   ["dashboard", "create", "vms", "storage", "detail", "settings"].forEach(t => $("view-" + t).classList.toggle("hide", t !== tab));
   const navTab = (tab === "detail" || tab === "storage") ? "vms" : tab;
   document.querySelectorAll(".side-nav [data-view], .mobile-nav [data-view]").forEach(b => b.classList.toggle("active", b.dataset.view === navTab));
-  $("crumb").textContent = ({dashboard:"OVERVIEW", create:"CREATE VM", vms:"INVENTORY", storage:"INVENTORY / STORAGE", detail:"INVENTORY", settings:"SETTINGS"})[tab] || "PHASE";
-  $("plan-loader").classList.toggle("hide", tab !== "create");
   if (tab === "vms") loadVms();
   if (tab === "dashboard") loadDashboard();
   if (tab === "settings") loadSettings();
@@ -100,28 +98,15 @@ function activeLiveView() {
   if (!$("view-vms").classList.contains("hide")) return "vms";
   return null;
 }
-function setLiveSync(text, state) {
-  const el = $("live-sync");
-  if (!el) return;
-  el.textContent = text;
-  el.classList.toggle("syncing", state === "syncing");
-  el.classList.toggle("stale", state === "stale");
-}
-function liveTime() {
-  return new Intl.DateTimeFormat(undefined, {hour:"2-digit", minute:"2-digit", second:"2-digit"}).format(new Date());
-}
 async function syncLive() {
   const view = activeLiveView();
   if (!view || document.hidden || liveSyncInFlight) return;
   liveSyncInFlight = true;
-  setLiveSync("LIVE · syncing", "syncing");
   try {
     if (view === "dashboard") await loadDashboard();
     else await loadVms({quiet:true});
-    setLiveSync(`LIVE · ${liveTime()}`);
-  } catch (e) {
-    setLiveSync("LIVE · retrying", "stale");
-  } finally {
+  } catch (e) { /* leave the current readout intact until the next tick */ }
+  finally {
     liveSyncInFlight = false;
   }
 }
@@ -487,7 +472,6 @@ async function loadVms(opts) {
     return `<button class="storage-pocket ${pct >= 90 ? "critical" : pct >= 75 ? "warning" : ""}" data-storage="${esc(name)}"><span class="storage-pocket-top"><span><b>${esc(name || "—")}</b><small>${esc(s.type || "storage")} · ${esc(s.status || "unknown")}</small></span><strong>${pct}%</strong></span><span class="capacity"><span style="width:${pct}%"></span></span><small>${capacity}</small><span class="storage-open">Open pool <i>→</i></span></button>`;
   }).join("") || `<span class="sub">No storage pools</span>`;
   $("inventory-storage").querySelectorAll("[data-storage]").forEach(b => b.addEventListener("click", () => openStorage(b.dataset.storage)));
-  setLiveSync(`LIVE · ${liveTime()}`);
 }
 
 function storagePercent(s) {
@@ -532,6 +516,18 @@ function bytes(n) {
 function metric(label, value, note) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong>${note ? `<small>${note}</small>` : ""}</div>`;
 }
+function renderCapacities(el, markup) {
+  const previous = new Map([...el.querySelectorAll(".capacity > span[data-meter]")]
+    .map(bar => [bar.dataset.meter, bar.style.width]));
+  el.innerHTML = markup;
+  el.querySelectorAll(".capacity > span[data-meter]").forEach(bar => {
+    const from = previous.get(bar.dataset.meter);
+    const to = bar.style.width;
+    if (!from || from === to) return;
+    bar.style.width = from;
+    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = to; }));
+  });
+}
 async function loadDashboard() {
   const [vms, host] = await Promise.all([api("/api/vms"), api("/api/host")]);
   if (!Array.isArray(vms)) return toast(vms.error || "Could not load overview", "err");
@@ -544,9 +540,8 @@ async function loadDashboard() {
   $("dashboard-metrics").innerHTML = metric("Machines", machines.length, "") + metric("Running", active, "") + metric("CPU", s.cpu != null ? Math.round(s.cpu * 100) + "%" : "—", cpuCount ? `${cpuCount} logical CPUs · load ${Number(load || 0).toFixed(2)}` : "") + metric("Memory", bytes(m.used), m.total ? `${Math.round(100 * m.used / m.total)}% of ${bytes(m.total)}` : "") + metric("Root filesystem", bytes(root.used), root.total ? `${Math.round(100 * root.used / root.total)}% used` : "") + metric("Templates", templates, "");
   $("dashboard-vms").innerHTML = vms.slice(0, 7).map(v => `<button data-vm="${esc(v.name)}"><span><b>${esc(v.name)}</b><small>${v.ip || "no guest IP"}</small></span><span class="badge ${v.template ? "template" : v.status}">${v.template ? "template" : v.status}</span></button>`).join("") || "<span class=\"sub\">No machines yet.</span>";
   $("dashboard-vms").querySelectorAll("[data-vm]").forEach(b => b.addEventListener("click", () => openVm(b.dataset.vm)));
-  $("dashboard-host").innerHTML = host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="util-line"><span>CPU</span><div class="capacity"><span style="width:${Math.min(100, 100 * Number(s.cpu || 0))}%"></span></div><b>${Math.round(100 * Number(s.cpu || 0))}%</b></div><div class="util-line"><span>Memory</span><div class="capacity"><span style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><b>${m.total ? Math.round(100 * m.used / m.total) : 0}%</b></div><div class="util-line"><span>Root</span><div class="capacity"><span style="width:${root.total ? Math.min(100, 100 * (root.used || 0) / root.total) : 0}%"></span></div><b>${root.total ? Math.round(100 * root.used / root.total) : 0}%</b></div>`;
-  $("dashboard-storage").innerHTML = (host.storage || []).map(x => { const total=Number(x.total||0), used=Number(x.used||0), pct=total?Math.min(100,100*used/total):0; return `<div class="storage-bar"><span><b>${esc(x.storage || x.name || "—")}</b><small>${esc(x.type || "storage")} · ${esc(x.status || "unknown")}</small></span><div class="capacity"><span style="width:${pct}%"></span></div><span>${total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable"}</span></div>`; }).join("") || "<span class=\"sub\">No storage data.</span>";
-  setLiveSync(`LIVE · ${liveTime()}`);
+  renderCapacities($("dashboard-host"), host.error ? esc(host.error) : `<b>${esc(host.node || "host")}</b><div class="util-line"><span>CPU</span><div class="capacity"><span data-meter="host-cpu" style="width:${Math.min(100, 100 * Number(s.cpu || 0))}%"></span></div><b>${Math.round(100 * Number(s.cpu || 0))}%</b></div><div class="util-line"><span>Memory</span><div class="capacity"><span data-meter="host-memory" style="width:${m.total ? Math.min(100, 100 * (m.used || 0) / m.total) : 0}%"></span></div><b>${m.total ? Math.round(100 * m.used / m.total) : 0}%</b></div><div class="util-line"><span>Root</span><div class="capacity"><span data-meter="host-root" style="width:${root.total ? Math.min(100, 100 * (root.used || 0) / root.total) : 0}%"></span></div><b>${root.total ? Math.round(100 * root.used / root.total) : 0}%</b></div>`);
+  renderCapacities($("dashboard-storage"), (host.storage || []).map(x => { const total=Number(x.total||0), used=Number(x.used||0), pct=total?Math.min(100,100*used/total):0, name=esc(x.storage || x.name || "—"); return `<div class="storage-bar"><span><b>${name}</b><small>${esc(x.type || "storage")} · ${esc(x.status || "unknown")}</small></span><div class="capacity"><span data-meter="storage-${name}" style="width:${pct}%"></span></div><span>${total ? `${bytes(used)} / ${bytes(total)}` : "capacity unavailable"}</span></div>`; }).join("") || "<span class=\"sub\">No storage data.</span>");
 }
 async function loadHost() {
   const host = await api("/api/host");
