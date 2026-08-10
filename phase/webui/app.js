@@ -650,6 +650,11 @@ function renderDetail(vm) {
     </div>
   </div>
 
+  <div class="card">
+    <h3>GPU <small style="font-weight:normal">vGPU passthrough</small></h3>
+    ${gpuCardHtml(vm)}
+  </div>
+
   <details class="management-panel">
     <summary><span>Manage hardware</span><small>Edit VM settings, attach or resize disks</small></summary>
     <div class="management-content">
@@ -725,6 +730,11 @@ function renderDetail(vm) {
   body.querySelectorAll("[data-pw]").forEach(b =>
     b.addEventListener("click", () => vmPower(vm.name, b.dataset.pw)));
   $("e-save").addEventListener("click", () => vmEdit(vm.name));
+  const gon = body.querySelector("#gpu-on");
+  if (gon) gon.addEventListener("click", () =>
+    vmGpu(vm.name, "on", (body.querySelector("#gpu-type") || {}).value));
+  const goff = body.querySelector("#gpu-off");
+  if (goff) goff.addEventListener("click", () => vmGpu(vm.name, "off"));
   $("d-add").addEventListener("click", () => vmDiskAdd(vm.name));
   body.querySelectorAll("[data-resize]").forEach(b =>
     b.addEventListener("click", () => {
@@ -742,6 +752,34 @@ function renderDetail(vm) {
   loadFirewall(vm.name);
   loadSnapshots(vm.name);
 }
+function gpuCardHtml(vm) {
+  const gpu = vm.gpu || null;
+  const gpuTypes = ((meta && meta.gpu_types) || []);
+  const stopped = vm.status === "stopped";
+  if (gpu) {
+    return `
+      <div class="kv" style="margin-bottom:10px">
+        <span class="k">Type</span><span class="v">${esc(gpu.mdev)}</span>
+        <span class="k">PCI</span><span class="v">${esc(gpu.pci)}</span>
+        <span class="k">Slot</span><span class="v">${esc(gpu.key)}</span>
+      </div>
+      <div class="row" style="align-items:center">
+        <button class="btn ghost" id="gpu-off" ${stopped ? "" : "disabled"}>Detach GPU</button>
+        ${stopped ? "" : "<small class='gpu-hint'>Stop the VM to detach the GPU</small>"}
+      </div>`;
+  }
+  return `
+    <div class="row" style="align-items:flex-end">
+      <div class="field" style="flex:1"><label>mdev type</label>
+        <select id="gpu-type">
+          ${gpuTypes.map(t => `<option value="${esc(t)}">${esc(t)}</option>`).join("") || "<option value=''>no vGPU types on host</option>"}
+        </select>
+      </div>
+      <button class="btn ghost" id="gpu-on" ${stopped && gpuTypes.length ? "" : "disabled"}>Attach GPU</button>
+    </div>
+    <small class="gpu-hint">${stopped ? "Requires a stopped VM — PCI passthrough is not hot-pluggable" : "Stop the VM to attach a GPU"}</small>`;
+}
+
 function esc(s) { return String(s == null ? "" : s).replace(/"/g, "&quot;").replace(/</g, "&lt;"); }
 function diskBusOptions() {
   return [["SCSI", "scsi"], ["SATA", "sata"], ["VirtIO", "virtio"], ["IDE", "ide"]]
@@ -775,6 +813,14 @@ async function vmPower(name, action) {
   if (r.error) return toast(r.error, "err");
   toast(action + "…", "");
   pollTask(r.task, () => { toast(name + " " + action + "ed", "ok"); openVm(name); });
+}
+async function vmGpu(name, action, mdev) {
+  const r = await api("/api/vms/" + encodeURIComponent(name) + "/gpu", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, mdev }),
+  });
+  if (r.error) return toast(r.error, "err");
+  pollTask(r.task, () => { toast("GPU " + (action === "on" ? "attached" : "detached"), "ok"); openVm(name); });
 }
 async function vmEdit(name) {
   const body = {

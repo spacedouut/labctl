@@ -26,6 +26,7 @@ Endpoints (all /api/* require X-Phase-Token when a token is configured):
   POST /api/provision     -> create + start + bootstrap (async task)
   POST /api/vms/<name>/power       {action: start|stop|reboot|shutdown|pause|resume}
   POST /api/vms/<name>/edit        {cores,memory,description,tags,onboot,protection}
+  POST /api/vms/<name>/gpu         {action: on|off, mdev: <type>} (VM must be stopped)
   POST /api/vms/<name>/disks/add   {id,size,storage}
   POST /api/vms/<name>/disks/resize {id,size}
   POST /api/vms/<name>/firewall    {from,port,proto}
@@ -48,6 +49,7 @@ import hashlib
 import json
 import os
 import pty as pty_mod
+import re
 import select
 import secrets
 import socket
@@ -60,6 +62,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
+from .engine import _discover_mdev, gpu_pci_for
 from .log import append_event
 from .pveapi import pam_login
 from .plan import list_plans, read_plan, realize_plan, save_plan
@@ -130,6 +133,7 @@ def _meta(cfg, qm) -> dict:
         "next_vmid": next_vmid(qm),
         "system_images": images,
         "live_sync_seconds": _live_sync_seconds(cfg),
+        "gpu_types": [t["type"] for t in _discover_mdev(qm.t)],
     }
 
 
@@ -334,10 +338,10 @@ def _vm_detail(cfg, qm, name: str) -> dict:
         if _DISK_RE.match(k):
             volume = v.split(",")[0]
             parts = volume.split(":", 1)
-            size_match = __import__("re").search(r"(?:^|,)size=([^,]+)", v)
+            size_match = re.search(r"(?:^|,)size=([^,]+)", v)
             disks.append({
                 "id": k,
-                "bus": __import__("re").match(r"^[a-z]+", k).group(0),
+                "bus": re.match(r"^[a-z]+", k).group(0),
                 "size": size_match.group(1) if size_match else "",
                 "storage": parts[0] if parts else "",
                 "volume": parts[1] if len(parts) > 1 else volume,
@@ -346,7 +350,14 @@ def _vm_detail(cfg, qm, name: str) -> dict:
             })
     bus_order = {"scsi": 0, "sata": 1, "virtio": 2, "ide": 3}
     disks.sort(key=lambda disk: (bus_order.get(disk["bus"], 99),
-                                 int(__import__("re").search(r"\d+$", disk["id"]).group(0))))
+                                 int(re.search(r"\d+$", disk["id"]).group(0))))
+    gpu = None
+    for key in ("hostpci0", "hostpci1", "hostpci2"):
+        val = conf.get(key, "")
+        m = re.search(r"mdev=([^,]+)", val)
+        if m:
+            gpu = {"key": key, "pci": val.split(",")[0], "mdev": m.group(1)}
+            break
     return {
         "vmid": vmid,
         "name": name,
@@ -361,7 +372,46 @@ def _vm_detail(cfg, qm, name: str) -> dict:
         "template": conf.get("template") == "1",
         "net0": conf.get("net0", ""),
         "disks": disks,
+        "gpu": gpu,
     }
+
+
+def _vm_gpu_set(cfg, qm, name: str, action: str, mdev: str = "") -> str:
+    """Attach/detach a vGPU (mdev passthrough) to a stopped VM."""
+    vmid = find_vmid(qm, name)
+    if qm.status(vmid) != "stopped":
+        raise ValueError("GPU changes require the VM to be stopped first")
+    conf = qm.config(vmid)
+    attached = None
+    for key in ("hostpci0", "hostpci1", "hostpci2"):
+        m = re.search(r"mdev=([^,]+)", conf.get(key, ""))
+        if m:
+            attached = {"key": key, "pci": conf[key].split(",")[0],
+                        "mdev": m.group(1)}
+            break
+    if action == "off":
+        if not attached:
+            raise ValueError("no GPU is attached to this VM")
+        qm.delete_props(vmid, attached["key"])
+        append_event(event="vm.gpu_detach", vmid=vmid, name=name,
+                     mdev=attached["mdev"])
+        return f"detached {attached['mdev']} from {name}"
+    if action == "on":
+        if attached:
+            raise ValueError(
+                f"GPU already attached: {attached['mdev']} ({attached['key']})")
+        if not mdev:
+            raise ValueError("mdev type is required to attach a GPU")
+        free_key = next((k for k in ("hostpci0", "hostpci1", "hostpci2")
+                         if k not in conf), None)
+        if free_key is None:
+            raise ValueError("no free hostpci slot (hostpci0-2 all in use)")
+        pci = gpu_pci_for(cfg, qm, mdev)
+        qm.set(vmid, **{free_key: f"{pci},mdev={mdev}"})
+        append_event(event="vm.gpu_attach", vmid=vmid, name=name,
+                     mdev=mdev, pci=pci)
+        return f"attached {mdev} ({pci}) to {name}"
+    raise ValueError(f"bad action: {action}")
 
 
 def _firewall_add(cfg, qm, name: str, frm: str, port: str,
@@ -778,6 +828,13 @@ def make_handler(cfg, qm, token: str = ""):
                     return self._json({"error": f"bad action: {action}"}, 400)
                 _cache_drop()
                 return self._task_json(getattr(qm, mapping[action]), vmid)
+            if path.startswith("/api/vms/") and path.endswith("/gpu"):
+                name = path[len("/api/vms/"):-len("/gpu")]
+                body = self._read_body() or {}
+                _cache_drop()
+                return self._task_json(
+                    _vm_gpu_set, cfg, qm, name,
+                    body.get("action", ""), body.get("mdev", ""))
             if path.startswith("/api/vms/") and path.endswith("/edit"):
                 name = path[len("/api/vms/"):-len("/edit")]
                 vmid = find_vmid(qm, name)

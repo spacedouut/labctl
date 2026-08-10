@@ -387,6 +387,29 @@ def test_web_api():
     check("web power stop", tr["status"] == "done")
     check("web vm stopped", get("/api/vms/webvm1")["status"] == "stopped")
 
+    # --- gpu toggle (attach/detach require a stopped VM) ---
+    check("web meta gpu types", "nvidia-223" in meta["gpu_types"])
+    check("web detail no gpu", get("/api/vms/webvm1")["gpu"] is None)
+    tg_on = wait_task(post("/api/vms/webvm1/gpu",
+                           {"action": "on", "mdev": "nvidia-223"})["task"])
+    check("web gpu attach", tg_on["status"] == "done")
+    dg = get("/api/vms/webvm1")
+    check("web gpu attached", dg["gpu"] and dg["gpu"]["mdev"] == "nvidia-223"
+          and dg["gpu"]["pci"] == "01:00.0" and dg["gpu"]["key"] == "hostpci0")
+    tg_dup = wait_task(post("/api/vms/webvm1/gpu",
+                            {"action": "on", "mdev": "nvidia-223"})["task"])
+    check("web gpu no double attach", tg_dup["status"] == "error")
+    tg_off = wait_task(post("/api/vms/webvm1/gpu", {"action": "off"})["task"])
+    check("web gpu detach", tg_off["status"] == "done")
+    check("web gpu detached", get("/api/vms/webvm1")["gpu"] is None)
+    tr2 = wait_task(post("/api/vms/webvm1/power", {"action": "start"})["task"])
+    check("web power start", tr2["status"] == "done")
+    tg_run = wait_task(post("/api/vms/webvm1/gpu",
+                            {"action": "on", "mdev": "nvidia-223"})["task"])
+    check("web gpu rejected while running", tg_run["status"] == "error")
+    tr3 = wait_task(post("/api/vms/webvm1/power", {"action": "stop"})["task"])
+    check("web power stop again", tr3["status"] == "done")
+
     te = wait_task(post("/api/vms/webvm1/edit", {"cores": "4", "memory": "4096",
                                                  "tags": ["web", "prod"]})["task"])
     check("web edit", te["status"] == "done")

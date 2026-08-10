@@ -213,6 +213,7 @@ button.btn:disabled:hover { filter: none; }
 .kv { display: grid; grid-template-columns: 170px 1fr; gap: 6px 16px; font-size: 13px; }
 .kv .k { color: var(--muted); }
 .kv .v { word-break: break-all; }
+.gpu-hint { color: var(--muted); font-size: 12px; margin-left: 10px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
 @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .management-panel { margin:0 0 18px; border:1px solid var(--border-strong); background:var(--surface); }

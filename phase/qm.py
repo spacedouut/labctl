@@ -69,6 +69,12 @@ class Qm:
                 args.append(str(v))
         self._run(args)
 
+    def delete_props(self, vmid: int, *keys: str) -> None:
+        """Delete config properties, e.g. delete_props(vmid, 'hostpci0')."""
+        if not keys:
+            return
+        self._run(["set", str(vmid), "--delete", ",".join(keys)])
+
     def clone(self, src: int, vmid: int, **opts) -> None:
         args = ["clone", str(src), str(vmid)]
         for k, v in opts.items():
