@@ -27,6 +27,7 @@ from .log import append_event, tail_events
 from .notify import send
 from .plan import parse_flags
 from .qm import Qm
+from .transport import LocalTransport
 from .util import PhaseError, die, human_bytes, log, warn
 from .vm import list_templates, next_template_vmid, next_vmid
 
@@ -167,12 +168,21 @@ def _discover_gpu_pci(transport) -> list[str]:
     return addrs
 
 
+def _host_transport(qm):
+    """Return the host command transport for either VM backend.
+
+    PVE API VM operations do not expose ``.t``. GPU/mdev discovery is still a
+    host-local operation, so use a local transport with that backend.
+    """
+    return getattr(qm, "t", None) or LocalTransport()
+
+
 def gpu_pci_for(cfg, qm: Qm, mdev_type: str) -> str:
     """Resolve a PCI address for an mdev type: config override, else discovery."""
     override = cfg.get(f"gpus.{mdev_type}.pci")
     if override:
         return override
-    addrs = _discover_gpu_pci(qm.t)
+    addrs = _discover_gpu_pci(_host_transport(qm))
     if not addrs:
         die(f"no NVIDIA GPU found to attach {mdev_type} — run `phase engine scan`")
     return addrs[0]

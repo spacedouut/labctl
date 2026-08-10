@@ -62,7 +62,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote
 
-from .engine import _discover_mdev, gpu_pci_for
+from .engine import _discover_mdev, _host_transport, gpu_pci_for
 from .log import append_event
 from .pveapi import pam_login
 from .plan import list_plans, read_plan, realize_plan, save_plan
@@ -133,7 +133,7 @@ def _meta(cfg, qm) -> dict:
         "next_vmid": next_vmid(qm),
         "system_images": images,
         "live_sync_seconds": _live_sync_seconds(cfg),
-        "gpu_types": [t["type"] for t in _discover_mdev(qm.t)],
+        "gpu_types": [t["type"] for t in _discover_mdev(_host_transport(qm))],
     }
 
 
